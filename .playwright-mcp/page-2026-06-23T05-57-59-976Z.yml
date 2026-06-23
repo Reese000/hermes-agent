@@ -1,0 +1,1081 @@
+- generic [active] [ref=e1]:
+  - blockquote [ref=e2]:
+    - heading [level=2] [ref=e3]: Documentation Index
+    - paragraph [ref=e4]:
+      - text: "Fetch the complete documentation index at:"
+      - link [ref=e5] [cursor=pointer]:
+        - /url: /docs/llms.txt
+        - text: /docs/llms.txt
+    - paragraph [ref=e6]: Use this file to discover all available pages before exploring further.
+  - generic [ref=e7]:
+    - link "Skip to main content" [ref=e8] [cursor=pointer]:
+      - /url: "#content-area"
+    - generic [ref=e10]:
+      - banner [ref=e11]:
+        - generic [ref=e15]:
+          - generic [ref=e17]:
+            - link "Claude Code Docs home page light logo" [ref=e19] [cursor=pointer]:
+              - /url: /docs/en/overview
+              - generic [ref=e20]: Claude Code Docs home page
+              - img "light logo" [ref=e21]
+            - generic [ref=e22]:
+              - button "Open search" [ref=e23] [cursor=pointer]:
+                - generic [ref=e24]: Search...
+                - img [ref=e25]
+              - button "Toggle assistant panel" [ref=e26] [cursor=pointer]:
+                - img [ref=e27]
+              - button "More actions" [ref=e30] [cursor=pointer]:
+                - img [ref=e31]
+          - button "Navigation Use Claude Code Choose a permission mode" [ref=e32] [cursor=pointer]:
+            - generic [ref=e33]:
+              - generic [ref=e34]: Navigation
+              - img [ref=e35]
+            - generic [ref=e37]:
+              - generic [ref=e38]:
+                - generic [ref=e39]: Use Claude Code
+                - img [ref=e40]
+              - generic [ref=e42]: Choose a permission mode
+      - main [ref=e44]:
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]:
+              - generic [ref=e49]: Use Claude Code
+              - generic [ref=e50]:
+                - heading "Choose a permission mode" [level=1] [ref=e51]
+                - generic [ref=e52]:
+                  - button "Copy page" [ref=e53] [cursor=pointer]:
+                    - generic [ref=e54]:
+                      - img [ref=e55]
+                      - generic [ref=e58]: Copy page
+                  - button "More actions" [ref=e59] [cursor=pointer]:
+                    - img [ref=e60]
+            - paragraph [ref=e63]: Control whether Claude asks before editing files or running commands. Cycle modes with Shift+Tab in the CLI or use the mode selector in VS Code, Desktop, and claude.ai.
+          - generic [ref=e64]:
+            - generic [ref=e65]: "When Claude wants to edit a file, run a shell command, or make a network request, it pauses and asks you to approve the action. Permission modes control how often that pause happens. The mode you pick shapes the flow of a session: default mode has you review each action as it comes, while looser modes let Claude work in longer uninterrupted stretches and report back when done. Pick more oversight for sensitive work, or fewer interruptions when you trust the direction."
+            - heading "Navigate to header Available modes" [level=2] [ref=e66]:
+              - link "Navigate to header" [ref=e67] [cursor=pointer]:
+                - /url: "#available-modes"
+                - img [ref=e69]
+              - generic [ref=e71] [cursor=pointer]: Available modes
+            - generic [ref=e72]: Each mode makes a different tradeoff between convenience and oversight. The table below shows what Claude can do without a permission prompt in each mode.
+            - table [ref=e75]:
+              - rowgroup [ref=e76]:
+                - row "Mode What runs without asking Best for" [ref=e77]:
+                  - columnheader "Mode" [ref=e78]
+                  - columnheader "What runs without asking" [ref=e79]
+                  - columnheader "Best for" [ref=e80]
+              - rowgroup [ref=e81]:
+                - row "default Reads only Getting started, sensitive work" [ref=e82]:
+                  - cell "default" [ref=e83]:
+                    - code [ref=e84]: default
+                  - cell "Reads only" [ref=e85]
+                  - cell "Getting started, sensitive work" [ref=e86]
+                - row "acceptEdits Reads, file edits, and common filesystem commands (mkdir, touch, mv, cp, etc.) Iterating on code you’re reviewing" [ref=e87]:
+                  - cell "acceptEdits" [ref=e88]:
+                    - link "acceptEdits" [ref=e89] [cursor=pointer]:
+                      - /url: "#auto-approve-file-edits-with-acceptedits-mode"
+                      - code [ref=e90]: acceptEdits
+                  - cell "Reads, file edits, and common filesystem commands (mkdir, touch, mv, cp, etc.)" [ref=e91]:
+                    - text: Reads, file edits, and common filesystem commands (
+                    - code [ref=e92]: mkdir
+                    - text: ","
+                    - code [ref=e93]: touch
+                    - text: ","
+                    - code [ref=e94]: mv
+                    - text: ","
+                    - code [ref=e95]: cp
+                    - text: ", etc.)"
+                  - cell "Iterating on code you’re reviewing" [ref=e96]
+                - row "plan Reads only Exploring a codebase before changing it" [ref=e97]:
+                  - cell "plan" [ref=e98]:
+                    - link "plan" [ref=e99] [cursor=pointer]:
+                      - /url: "#analyze-before-you-edit-with-plan-mode"
+                      - code [ref=e100]: plan
+                  - cell "Reads only" [ref=e101]
+                  - cell "Exploring a codebase before changing it" [ref=e102]
+                - row "auto Everything, with background safety checks Long tasks, reducing prompt fatigue" [ref=e103]:
+                  - cell "auto" [ref=e104]:
+                    - link "auto" [ref=e105] [cursor=pointer]:
+                      - /url: "#eliminate-prompts-with-auto-mode"
+                      - code [ref=e106]: auto
+                  - cell "Everything, with background safety checks" [ref=e107]
+                  - cell "Long tasks, reducing prompt fatigue" [ref=e108]
+                - row "dontAsk Only pre-approved tools Locked-down CI and scripts" [ref=e109]:
+                  - cell "dontAsk" [ref=e110]:
+                    - link "dontAsk" [ref=e111] [cursor=pointer]:
+                      - /url: "#allow-only-pre-approved-tools-with-dontask-mode"
+                      - code [ref=e112]: dontAsk
+                  - cell "Only pre-approved tools" [ref=e113]
+                  - cell "Locked-down CI and scripts" [ref=e114]
+                - row "bypassPermissions Everything Isolated containers and VMs only" [ref=e115]:
+                  - cell "bypassPermissions" [ref=e116]:
+                    - link "bypassPermissions" [ref=e117] [cursor=pointer]:
+                      - /url: "#skip-all-checks-with-bypasspermissions-mode"
+                      - code [ref=e118]: bypassPermissions
+                  - cell "Everything" [ref=e119]
+                  - cell "Isolated containers and VMs only" [ref=e120]
+            - generic [ref=e121]:
+              - text: In every mode except
+              - code [ref=e122]: bypassPermissions
+              - text: ", writes to"
+              - link "protected paths" [ref=e123] [cursor=pointer]:
+                - /url: "#protected-paths"
+              - text: are never auto-approved, guarding repository state and Claude’s own configuration against accidental corruption.
+            - generic [ref=e124]:
+              - text: Modes set the baseline. Layer
+              - link "permission rules" [ref=e125] [cursor=pointer]:
+                - /url: /docs/en/permissions#manage-permissions
+              - text: on top to pre-approve or block specific tools. Deny rules and explicit ask rules apply in every mode, including
+              - code [ref=e126]: bypassPermissions
+              - text: . Allow rules have no effect in that mode because everything else is already approved.
+            - heading "Navigate to header Switch permission modes" [level=2] [ref=e127]:
+              - link "Navigate to header" [ref=e128] [cursor=pointer]:
+                - /url: "#switch-permission-modes"
+                - img [ref=e130]
+              - generic [ref=e132] [cursor=pointer]: Switch permission modes
+            - generic [ref=e133]: You can switch modes mid-session, at startup, or as a persistent default. The mode is set through these controls, not by asking Claude in chat. Select your interface below to see how to change it.
+            - generic [ref=e134]:
+              - tablist [ref=e135]:
+                - tab "CLI" [selected] [ref=e136] [cursor=pointer]:
+                  - generic [ref=e137]: CLI
+                - tab "VS Code" [ref=e138] [cursor=pointer]:
+                  - generic [ref=e139]: VS Code
+                - tab "JetBrains" [ref=e140] [cursor=pointer]:
+                  - generic [ref=e141]: JetBrains
+                - tab "Desktop" [ref=e142] [cursor=pointer]:
+                  - generic [ref=e143]: Desktop
+                - tab "Web and mobile" [ref=e144] [cursor=pointer]:
+                  - generic [ref=e145]: Web and mobile
+              - tabpanel [ref=e147]:
+                - generic [ref=e148]:
+                  - strong [ref=e149]: During a session
+                  - text: ": press"
+                  - code [ref=e150]: Shift+Tab
+                  - text: to cycle
+                  - code [ref=e151]: default
+                  - text: →
+                  - code [ref=e152]: acceptEdits
+                  - text: →
+                  - code [ref=e153]: plan
+                  - text: ". The current mode appears in the status bar. Not every mode is in the default cycle:"
+                - list [ref=e154]:
+                  - listitem [ref=e155]:
+                    - code [ref=e156]: auto
+                    - text: ": appears when your account meets the"
+                    - link "auto mode requirements" [ref=e157] [cursor=pointer]:
+                      - /url: "#eliminate-prompts-with-auto-mode"
+                    - text: ; cycling to auto shows an opt-in prompt until you accept it, or select
+                    - strong [ref=e158]: No, don’t ask again
+                    - text: to remove auto from the cycle
+                  - listitem [ref=e159]:
+                    - code [ref=e160]: bypassPermissions
+                    - text: ": appears after you start with"
+                    - code [ref=e161]: "--permission-mode bypassPermissions"
+                    - text: ","
+                    - code [ref=e162]: "--dangerously-skip-permissions"
+                    - text: ", or"
+                    - code [ref=e163]: "--allow-dangerously-skip-permissions"
+                    - text: ; the
+                    - code [ref=e164]: "--allow-"
+                    - text: variant adds the mode to the cycle without activating it
+                  - listitem [ref=e165]:
+                    - code [ref=e166]: dontAsk
+                    - text: ": never appears in the cycle; set it with"
+                    - code [ref=e167]: "--permission-mode dontAsk"
+                - generic [ref=e168]:
+                  - text: Enabled optional modes slot in after
+                  - code [ref=e169]: plan
+                  - text: ", with"
+                  - code [ref=e170]: bypassPermissions
+                  - text: first and
+                  - code [ref=e171]: auto
+                  - text: last. If you have both enabled, you will cycle through
+                  - code [ref=e172]: bypassPermissions
+                  - text: on the way to
+                  - code [ref=e173]: auto
+                  - text: .
+                - generic [ref=e174]:
+                  - strong [ref=e175]: At startup
+                  - text: ": pass the mode as a flag."
+                - generic [ref=e176]:
+                  - generic [ref=e177]:
+                    - button "Report incorrect code" [ref=e179] [cursor=pointer]:
+                      - img [ref=e180]
+                    - button "Copy the contents from the code block" [ref=e183] [cursor=pointer]:
+                      - img [ref=e184]
+                    - button "Ask Assistant" [ref=e188] [cursor=pointer]:
+                      - img [ref=e189]
+                  - code [ref=e195]:
+                    - generic [ref=e196]: claude --permission-mode plan
+                - generic [ref=e197]:
+                  - strong [ref=e198]: As a default
+                  - text: ": set"
+                  - code [ref=e199]: defaultMode
+                  - text: in
+                  - link "settings" [ref=e200] [cursor=pointer]:
+                    - /url: /docs/en/settings#settings-files
+                  - text: .
+                - generic [ref=e201]:
+                  - generic [ref=e202]:
+                    - button "Report incorrect code" [ref=e204] [cursor=pointer]:
+                      - img [ref=e205]
+                    - button "Copy the contents from the code block" [ref=e208] [cursor=pointer]:
+                      - img [ref=e209]
+                    - button "Ask Assistant" [ref=e213] [cursor=pointer]:
+                      - img [ref=e214]
+                  - code [ref=e220]:
+                    - generic [ref=e221]: "{"
+                    - generic [ref=e222]: "\"permissions\": {"
+                    - generic [ref=e223]: "\"defaultMode\": \"acceptEdits\""
+                    - generic [ref=e224]: "}"
+                    - generic [ref=e225]: "}"
+                - generic [ref=e226]:
+                  - text: The same
+                  - code [ref=e227]: "--permission-mode"
+                  - text: flag works with
+                  - code [ref=e228]: "-p"
+                  - text: for
+                  - link "non-interactive runs" [ref=e229] [cursor=pointer]:
+                    - /url: /docs/en/headless
+                  - text: .
+            - heading "Navigate to header Auto-approve file edits with acceptEdits mode" [level=2] [ref=e230]:
+              - link "Navigate to header" [ref=e231] [cursor=pointer]:
+                - /url: "#auto-approve-file-edits-with-acceptedits-mode"
+                - img [ref=e233]
+              - generic [ref=e235] [cursor=pointer]: Auto-approve file edits with acceptEdits mode
+            - generic [ref=e236]:
+              - code [ref=e237]: acceptEdits
+              - text: mode lets Claude create and edit files in your working directory without prompting. The status bar shows
+              - code [ref=e238]: ⏵⏵ accept edits on
+              - text: while this mode is active.
+            - generic [ref=e239]:
+              - text: In addition to file edits,
+              - code [ref=e240]: acceptEdits
+              - text: "mode auto-approves common filesystem Bash commands:"
+              - code [ref=e241]: mkdir
+              - text: ","
+              - code [ref=e242]: touch
+              - text: ","
+              - code [ref=e243]: rm
+              - text: ","
+              - code [ref=e244]: rmdir
+              - text: ","
+              - code [ref=e245]: mv
+              - text: ","
+              - code [ref=e246]: cp
+              - text: ", and"
+              - code [ref=e247]: sed
+              - text: . These commands are also auto-approved when prefixed with safe environment variables such as
+              - code [ref=e248]: LANG=C
+              - text: or
+              - code [ref=e249]: NO_COLOR=1
+              - text: ", or process wrappers such as"
+              - code [ref=e250]: timeout
+              - text: ","
+              - code [ref=e251]: nice
+              - text: ", or"
+              - code [ref=e252]: nohup
+              - text: . Like file edits, auto-approval applies only to paths inside your working directory or
+              - code [ref=e253]: additionalDirectories
+              - text: . Paths outside that scope, writes to
+              - link "protected paths" [ref=e254] [cursor=pointer]:
+                - /url: "#protected-paths"
+              - text: ", and all other Bash commands still prompt."
+            - generic [ref=e255]:
+              - text: When the
+              - link "PowerShell tool" [ref=e256] [cursor=pointer]:
+                - /url: /docs/en/tools-reference#powershell-tool
+              - text: is enabled,
+              - code [ref=e257]: acceptEdits
+              - text: mode also auto-approves
+              - code [ref=e258]: Set-Content
+              - text: ","
+              - code [ref=e259]: Add-Content
+              - text: ","
+              - code [ref=e260]: Clear-Content
+              - text: ", and"
+              - code [ref=e261]: Remove-Item
+              - text: on in-scope paths, along with their common aliases. The same scope and protected-path rules apply.
+            - generic [ref=e262]:
+              - text: Use
+              - code [ref=e263]: acceptEdits
+              - text: when you want to review changes in your editor or via
+              - code [ref=e264]: git diff
+              - text: after the fact rather than approving each edit inline. Press
+              - code [ref=e265]: Shift+Tab
+              - text: "once from default mode to enter it, or start with it directly:"
+            - generic [ref=e266]:
+              - generic [ref=e267]:
+                - button "Report incorrect code" [ref=e269] [cursor=pointer]:
+                  - img [ref=e270]
+                - button "Copy the contents from the code block" [ref=e273] [cursor=pointer]:
+                  - img [ref=e274]
+                - button "Ask Assistant" [ref=e278] [cursor=pointer]:
+                  - img [ref=e279]
+              - code [ref=e285]:
+                - generic [ref=e286]: claude --permission-mode acceptEdits
+            - heading "Navigate to header Analyze before you edit with plan mode" [level=2] [ref=e287]:
+              - link "Navigate to header" [ref=e288] [cursor=pointer]:
+                - /url: "#analyze-before-you-edit-with-plan-mode"
+                - img [ref=e290]
+              - generic [ref=e292] [cursor=pointer]: Analyze before you edit with plan mode
+            - generic [ref=e293]: Plan mode tells Claude to research and propose changes without making them. Claude reads files, runs shell commands to explore, and writes a plan, but does not edit your source. Permission prompts still apply the same as default mode.
+            - generic [ref=e294]:
+              - text: Enter plan mode by pressing
+              - code [ref=e295]: Shift+Tab
+              - text: or prefixing a single prompt with
+              - code [ref=e296]: /plan
+              - text: ". You can also start in plan mode from the CLI:"
+            - generic [ref=e297]:
+              - generic [ref=e298]:
+                - button "Report incorrect code" [ref=e300] [cursor=pointer]:
+                  - img [ref=e301]
+                - button "Copy the contents from the code block" [ref=e304] [cursor=pointer]:
+                  - img [ref=e305]
+                - button "Ask Assistant" [ref=e309] [cursor=pointer]:
+                  - img [ref=e310]
+              - code [ref=e316]:
+                - generic [ref=e317]: claude --permission-mode plan
+            - generic [ref=e318]:
+              - text: Press
+              - code [ref=e319]: Shift+Tab
+              - text: again to leave plan mode without approving a plan.
+            - heading "Navigate to header Review and approve a plan" [level=3] [ref=e320]:
+              - link "Navigate to header" [ref=e321] [cursor=pointer]:
+                - /url: "#review-and-approve-a-plan"
+                - img [ref=e323]
+              - generic [ref=e325] [cursor=pointer]: Review and approve a plan
+            - generic [ref=e326]: "When the plan is ready, Claude presents it and asks how to proceed. From that prompt you can:"
+            - list [ref=e327]:
+              - listitem [ref=e328]: Approve and start in auto mode
+              - listitem [ref=e329]: Approve and accept edits
+              - listitem [ref=e330]: Approve and review each edit manually
+              - listitem [ref=e331]: Keep planning with feedback
+              - listitem [ref=e332]:
+                - text: Refine with
+                - link "Ultraplan" [ref=e333] [cursor=pointer]:
+                  - /url: /docs/en/ultraplan
+                - text: for browser-based review
+            - generic [ref=e334]:
+              - text: Approving a plan exits plan mode and switches the session to the permission mode each approve option describes, so Claude starts editing. To plan again, cycle back to plan mode with
+              - code [ref=e335]: Shift+Tab
+              - text: ", or prefix your next prompt with"
+              - code [ref=e336]: /plan
+              - text: .
+            - generic [ref=e337]:
+              - text: Press
+              - code [ref=e338]: Ctrl+G
+              - text: to open the proposed plan in your default text editor and edit it directly before Claude proceeds. When
+              - link "showClearContextOnPlanAccept" [ref=e339] [cursor=pointer]:
+                - /url: /docs/en/settings#available-settings
+                - code [ref=e340]: showClearContextOnPlanAccept
+              - text: is enabled, each approve option also offers to clear the planning context first.
+            - generic [ref=e341]:
+              - text: Accepting a plan also names the session from the plan content automatically, unless you’ve already set a name with
+              - code [ref=e342]: "--name"
+              - text: or
+              - code [ref=e343]: /rename
+              - text: .
+            - heading "Navigate to header Set plan mode as the default" [level=3] [ref=e344]:
+              - link "Navigate to header" [ref=e345] [cursor=pointer]:
+                - /url: "#set-plan-mode-as-the-default"
+                - img [ref=e347]
+              - generic [ref=e349] [cursor=pointer]: Set plan mode as the default
+            - generic [ref=e350]:
+              - text: To make plan mode the default for a project, set
+              - code [ref=e351]: defaultMode
+              - text: in
+              - code [ref=e352]: .claude/settings.json
+              - text: ":"
+            - generic [ref=e353]:
+              - generic [ref=e354]:
+                - button "Report incorrect code" [ref=e356] [cursor=pointer]:
+                  - img [ref=e357]
+                - button "Copy the contents from the code block" [ref=e360] [cursor=pointer]:
+                  - img [ref=e361]
+                - button "Ask Assistant" [ref=e365] [cursor=pointer]:
+                  - img [ref=e366]
+              - code [ref=e372]:
+                - generic [ref=e373]: "{"
+                - generic [ref=e374]: "\"permissions\": {"
+                - generic [ref=e375]: "\"defaultMode\": \"plan\""
+                - generic [ref=e376]: "}"
+                - generic [ref=e377]: "}"
+            - heading "Navigate to header Eliminate prompts with auto mode" [level=2] [ref=e378]:
+              - link "Navigate to header" [ref=e379] [cursor=pointer]:
+                - /url: "#eliminate-prompts-with-auto-mode"
+                - img [ref=e381]
+              - generic [ref=e383] [cursor=pointer]: Eliminate prompts with auto mode
+            - generic [ref=e384]:
+              - img "Note" [ref=e386]
+              - generic [ref=e389]: Auto mode requires Claude Code v2.1.83 or later.
+            - generic [ref=e390]:
+              - text: Auto mode lets Claude execute without routine permission prompts. A separate classifier model reviews actions before they run, blocking anything that escalates beyond your request, targets unrecognized infrastructure, or appears driven by hostile content Claude read. Explicit
+              - link "ask rules" [ref=e391] [cursor=pointer]:
+                - /url: /docs/en/permissions#manage-permissions
+              - text: still force a prompt.
+            - generic [ref=e392]:
+              - text: Auto mode also nudges Claude to keep working without stopping for clarifying questions, though Claude still asks when your prompt or a skill explicitly relies on it. For stronger autonomous behavior while keeping permission prompts, set the
+              - link "Proactive output style" [ref=e393] [cursor=pointer]:
+                - /url: /docs/en/output-styles
+              - text: instead.
+            - generic [ref=e394]:
+              - img "Warning" [ref=e396]
+              - generic [ref=e399]: Auto mode is a research preview. It reduces prompts but does not guarantee safety. Use it for tasks where you trust the general direction, not as a replacement for review on sensitive operations.
+            - generic [ref=e400]: "Auto mode is available only when your account meets all of these requirements:"
+            - list [ref=e401]:
+              - listitem [ref=e402]:
+                - strong [ref=e403]: Plan
+                - text: ": All plans."
+              - listitem [ref=e404]:
+                - strong [ref=e405]: Admin
+                - text: ": on Team and Enterprise, an admin must enable it in"
+                - link "Claude Code admin settings" [ref=e406] [cursor=pointer]:
+                  - /url: https://claude.ai/admin-settings/claude-code
+                - text: before users can turn it on. Admins can also lock it off by setting
+                - code [ref=e407]: permissions.disableAutoMode
+                - text: to
+                - code [ref=e408]: "\"disable\""
+                - text: in
+                - link "managed settings" [ref=e409] [cursor=pointer]:
+                  - /url: /docs/en/permissions#managed-settings
+                - text: .
+              - listitem [ref=e410]:
+                - strong [ref=e411]: Model
+                - text: ": on the Anthropic API, Claude Opus 4.6 or later, or Sonnet 4.6. On Amazon Bedrock, Google Cloud Vertex AI, and Microsoft Foundry, only Claude Opus 4.7 and Opus 4.8. Older models, including Sonnet 4.5, Opus 4.5, Haiku, and claude-3 models, are not supported on any provider."
+              - listitem [ref=e412]:
+                - strong [ref=e413]: Provider
+                - text: ": available by default on the Anthropic API. On Amazon Bedrock, Google Cloud Vertex AI, and Microsoft Foundry, auto mode is off until you"
+                - link "set CLAUDE_CODE_ENABLE_AUTO_MODE" [ref=e414] [cursor=pointer]:
+                  - /url: "#enable-auto-mode-on-bedrock-vertex-ai-or-foundry"
+                  - text: set
+                  - code [ref=e415]: CLAUDE_CODE_ENABLE_AUTO_MODE
+                - text: .
+            - generic [ref=e416]:
+              - text: If Claude Code reports auto mode as unavailable, one of these requirements is unmet; this is not a transient outage. A separate message that names a model and says auto mode “cannot determine the safety” of an action is a transient classifier outage; see the
+              - link "error reference" [ref=e417] [cursor=pointer]:
+                - /url: /docs/en/errors#auto-mode-cannot-determine-the-safety-of-an-action
+              - text: .
+            - generic [ref=e418]:
+              - text: If you set
+              - code [ref=e419]: "defaultMode: \"auto\""
+              - text: in
+              - link "settings" [ref=e420] [cursor=pointer]:
+                - /url: /docs/en/settings#available-settings
+              - text: and the session starts in
+              - code [ref=e421]: default
+              - text: mode with no error, the setting is likely in
+              - code [ref=e422]: .claude/settings.json
+              - text: or
+              - code [ref=e423]: .claude/settings.local.json
+              - text: . Claude Code v2.1.142 and later ignore
+              - code [ref=e424]: auto
+              - text: from those files so a repository cannot grant itself auto mode. Move it to
+              - code [ref=e425]: ~/.claude/settings.json
+              - text: .
+            - heading "Navigate to header Enable auto mode on Bedrock, Vertex AI, or Foundry" [level=3] [ref=e426]:
+              - link "Navigate to header" [ref=e427] [cursor=pointer]:
+                - /url: "#enable-auto-mode-on-bedrock-vertex-ai-or-foundry"
+                - img [ref=e429]
+              - generic [ref=e431] [cursor=pointer]: Enable auto mode on Bedrock, Vertex AI, or Foundry
+            - generic [ref=e432]:
+              - text: "On"
+              - link "Amazon Bedrock" [ref=e433] [cursor=pointer]:
+                - /url: /docs/en/amazon-bedrock
+              - text: ","
+              - link "Google Cloud Vertex AI" [ref=e434] [cursor=pointer]:
+                - /url: /docs/en/google-vertex-ai
+              - text: ", and"
+              - link "Microsoft Foundry" [ref=e435] [cursor=pointer]:
+                - /url: /docs/en/microsoft-foundry
+              - text: ", auto mode does not appear in the"
+              - code [ref=e436]: Shift+Tab
+              - text: cycle until
+              - code [ref=e437]: CLAUDE_CODE_ENABLE_AUTO_MODE
+              - text: is set to
+              - code [ref=e438]: "1"
+              - text: . The variable works in Claude Code v2.1.158 and later. Only Claude Opus 4.7 and Opus 4.8 are supported on these providers.
+            - generic [ref=e439]:
+              - text: To enable it for one developer, add the variable to the
+              - code [ref=e440]: env
+              - text: block in
+              - code [ref=e441]: ~/.claude/settings.json
+              - text: ":"
+            - generic [ref=e442]:
+              - generic [ref=e443]:
+                - button "Report incorrect code" [ref=e445] [cursor=pointer]:
+                  - img [ref=e446]
+                - button "Copy the contents from the code block" [ref=e449] [cursor=pointer]:
+                  - img [ref=e450]
+                - button "Ask Assistant" [ref=e454] [cursor=pointer]:
+                  - img [ref=e455]
+              - code [ref=e461]:
+                - generic [ref=e462]: "{"
+                - generic [ref=e463]: "\"env\": {"
+                - generic [ref=e464]: "\"CLAUDE_CODE_ENABLE_AUTO_MODE\": \"1\""
+                - generic [ref=e465]: "}"
+                - generic [ref=e466]: "}"
+            - generic [ref=e467]:
+              - text: To enable it for your organization, add the same
+              - code [ref=e468]: env
+              - text: block to
+              - link "managed settings" [ref=e469] [cursor=pointer]:
+                - /url: /docs/en/settings#settings-files
+              - text: .
+            - generic [ref=e470]:
+              - text: Once the variable is set, auto mode appears in the
+              - code [ref=e471]: Shift+Tab
+              - text: cycle for every session. To make it the default starting mode, also set
+              - code [ref=e472]: "\"permissions\": {\"defaultMode\": \"auto\"}"
+              - text: in user or managed settings. On these providers, Claude Code ignores
+              - code [ref=e473]: "defaultMode: \"auto\""
+              - text: unless
+              - code [ref=e474]: CLAUDE_CODE_ENABLE_AUTO_MODE
+              - text: is also set.
+            - generic [ref=e475]:
+              - text: To prevent developers from enabling auto mode, set
+              - code [ref=e476]: disableAutoMode
+              - text: to
+              - code [ref=e477]: "\"disable\""
+              - text: in managed settings. This overrides the enable variable.
+            - generic [ref=e478]:
+              - text: If you connect through an
+              - link "LLM gateway" [ref=e479] [cursor=pointer]:
+                - /url: /docs/en/llm-gateway
+              - text: configured with
+              - code [ref=e480]: ANTHROPIC_BASE_URL
+              - text: ", auto mode may already be reachable without the enable variable, because the gateway routes requests through the Anthropic API. The"
+              - code [ref=e481]: disableAutoMode
+              - text: setting applies the same way in that configuration.
+            - heading "Navigate to header What the classifier blocks by default" [level=3] [ref=e482]:
+              - link "Navigate to header" [ref=e483] [cursor=pointer]:
+                - /url: "#what-the-classifier-blocks-by-default"
+                - img [ref=e485]
+              - generic [ref=e487] [cursor=pointer]: What the classifier blocks by default
+            - generic [ref=e488]:
+              - text: The classifier trusts your working directory and your repo’s configured remotes. Everything else is treated as external until you
+              - link "configure trusted infrastructure" [ref=e489] [cursor=pointer]:
+                - /url: /docs/en/auto-mode-config
+              - text: .
+            - generic [ref=e490]:
+              - strong [ref=e491]: Blocked by default
+              - text: ":"
+            - list [ref=e492]:
+              - listitem [ref=e493]:
+                - text: Downloading and executing code, like
+                - code [ref=e494]: curl | bash
+              - listitem [ref=e495]: Sending sensitive data to external endpoints
+              - listitem [ref=e496]: Production deploys and migrations
+              - listitem [ref=e497]: Mass deletion on cloud storage
+              - listitem [ref=e498]: Granting IAM or repo permissions
+              - listitem [ref=e499]: Modifying shared infrastructure
+              - listitem [ref=e500]: Irreversibly destroying files that existed before the session
+              - listitem [ref=e501]:
+                - text: Force push, or pushing directly to
+                - code [ref=e502]: main
+              - listitem [ref=e503]:
+                - code [ref=e504]: git reset --hard
+                - text: ","
+                - code [ref=e505]: git checkout -- .
+                - text: ","
+                - code [ref=e506]: git restore .
+                - text: ","
+                - code [ref=e507]: git clean -fd
+                - text: ","
+                - code [ref=e508]: git stash drop
+                - text: ", or"
+                - code [ref=e509]: git stash clear
+                - text: ", which the classifier presumes would discard uncommitted changes"
+              - listitem [ref=e510]:
+                - code [ref=e511]: git commit --amend
+                - text: when the commit at HEAD was not created in this session
+              - listitem [ref=e512]:
+                - code [ref=e513]: terraform destroy
+                - text: ","
+                - code [ref=e514]: pulumi destroy
+                - text: ","
+                - code [ref=e515]: cdk destroy
+                - text: ", or"
+                - code [ref=e516]: terragrunt destroy
+                - text: ", and applying a plan that destroys resources"
+            - generic [ref=e517]:
+              - strong [ref=e518]: Allowed by default
+              - text: ":"
+            - list [ref=e519]:
+              - listitem [ref=e520]: Local file operations in your working directory
+              - listitem [ref=e521]: Installing dependencies declared in your lock files or manifests
+              - listitem [ref=e522]:
+                - text: Reading
+                - code [ref=e523]: .env
+                - text: and sending credentials to their matching API
+              - listitem [ref=e524]: Read-only HTTP requests
+              - listitem [ref=e525]: Pushing to the branch you started on or one Claude created
+            - generic [ref=e526]:
+              - text: Sandbox network access requests are routed through the classifier rather than allowed by default. Run
+              - code [ref=e527]: claude auto-mode defaults
+              - text: to see the full rule lists. If routine actions get blocked, an administrator can add trusted repos, buckets, and services via the
+              - code [ref=e528]: autoMode.environment
+              - text: "setting: see"
+              - link "Configure auto mode" [ref=e529] [cursor=pointer]:
+                - /url: /docs/en/auto-mode-config
+              - text: .
+            - heading "Navigate to header Boundaries you state in conversation" [level=3] [ref=e530]:
+              - link "Navigate to header" [ref=e531] [cursor=pointer]:
+                - /url: "#boundaries-you-state-in-conversation"
+                - img [ref=e533]
+              - generic [ref=e535] [cursor=pointer]: Boundaries you state in conversation
+            - generic [ref=e536]: The classifier treats boundaries you state in the conversation as a block signal. If you tell Claude “don’t push” or “wait until I review before deploying”, the classifier blocks matching actions even when the default rules would allow them. A boundary stays in force until you lift it in a later message. Claude’s own judgment that a condition was met does not lift it.
+            - generic [ref=e537]:
+              - text: Boundaries are not stored as rules. The classifier re-reads them from the transcript on each check, so a boundary can be lost if
+              - link "context compaction" [ref=e538] [cursor=pointer]:
+                - /url: /docs/en/costs#reduce-token-usage
+              - text: removes the message that stated it. For a hard guarantee, add a
+              - link "deny rule" [ref=e539] [cursor=pointer]:
+                - /url: /docs/en/permissions#permission-rule-syntax
+              - text: instead.
+            - heading "Navigate to header When auto mode falls back" [level=3] [ref=e540]:
+              - link "Navigate to header" [ref=e541] [cursor=pointer]:
+                - /url: "#when-auto-mode-falls-back"
+                - img [ref=e543]
+              - generic [ref=e545] [cursor=pointer]: When auto mode falls back
+            - generic [ref=e546]:
+              - text: Each denied action shows a notification and appears in
+              - code [ref=e547]: /permissions
+              - text: under the Recently denied tab, where you can press
+              - code [ref=e548]: r
+              - text: to retry it with a manual approval.
+            - generic [ref=e549]: If the classifier blocks an action 3 times in a row or 20 times total, auto mode pauses and Claude Code resumes prompting. Approving the prompted action resumes auto mode. These thresholds are not configurable. Any allowed action resets the consecutive counter, while the total counter persists for the session and resets only when its own limit triggers a fallback.
+            - generic [ref=e550]:
+              - text: In
+              - link "non-interactive mode" [ref=e551] [cursor=pointer]:
+                - /url: /docs/en/headless
+              - text: with the
+              - code [ref=e552]: "-p"
+              - text: flag, repeated blocks abort the session since there is no user to prompt.
+            - generic [ref=e553]:
+              - text: Repeated blocks usually mean the classifier is missing context about your infrastructure. Use
+              - code [ref=e554]: /feedback
+              - text: to report false positives, or have an administrator
+              - link "configure trusted infrastructure" [ref=e555] [cursor=pointer]:
+                - /url: /docs/en/auto-mode-config
+              - text: .
+            - generic [ref=e556]:
+              - group [ref=e557]:
+                - generic "How the classifier evaluates actions" [ref=e558] [cursor=pointer]:
+                  - img [ref=e560]
+                  - paragraph [ref=e562]: How the classifier evaluates actions
+              - group [ref=e563]:
+                - generic "How auto mode handles subagents" [ref=e564] [cursor=pointer]:
+                  - img [ref=e566]
+                  - paragraph [ref=e568]: How auto mode handles subagents
+              - group [ref=e569]:
+                - generic "Cost and latency" [ref=e570] [cursor=pointer]:
+                  - img [ref=e572]
+                  - paragraph [ref=e574]: Cost and latency
+            - heading "Navigate to header Allow only pre-approved tools with dontAsk mode" [level=2] [ref=e575]:
+              - link "Navigate to header" [ref=e576] [cursor=pointer]:
+                - /url: "#allow-only-pre-approved-tools-with-dontask-mode"
+                - img [ref=e578]
+              - generic [ref=e580] [cursor=pointer]: Allow only pre-approved tools with dontAsk mode
+            - generic [ref=e581]:
+              - code [ref=e582]: dontAsk
+              - text: mode auto-denies every tool call that would otherwise prompt. Only actions matching your
+              - code [ref=e583]: permissions.allow
+              - text: rules and
+              - link "read-only Bash commands" [ref=e584] [cursor=pointer]:
+                - /url: /docs/en/permissions#read-only-commands
+              - text: can execute; explicit
+              - link "ask rules" [ref=e585] [cursor=pointer]:
+                - /url: /docs/en/permissions#manage-permissions
+                - code [ref=e586]: ask
+                - text: rules
+              - text: are denied rather than prompting. This makes the mode fully non-interactive for CI pipelines or restricted environments where you pre-define exactly what Claude may do. Cloud sessions on
+              - link "Claude Code on the web" [ref=e587] [cursor=pointer]:
+                - /url: /docs/en/claude-code-on-the-web
+              - text: ignore
+              - code [ref=e588]: "defaultMode: \"dontAsk\""
+              - text: ; see
+              - link "bypassPermissions" [ref=e589] [cursor=pointer]:
+                - /url: "#skip-all-checks-with-bypasspermissions-mode"
+              - text: for details.
+            - generic [ref=e590]: "Set it at startup with the flag:"
+            - generic [ref=e591]:
+              - generic [ref=e592]:
+                - button "Report incorrect code" [ref=e594] [cursor=pointer]:
+                  - img [ref=e595]
+                - button "Copy the contents from the code block" [ref=e598] [cursor=pointer]:
+                  - img [ref=e599]
+                - button "Ask Assistant" [ref=e603] [cursor=pointer]:
+                  - img [ref=e604]
+              - code [ref=e610]:
+                - generic [ref=e611]: claude --permission-mode dontAsk
+            - heading "Navigate to header Skip all checks with bypassPermissions mode" [level=2] [ref=e612]:
+              - link "Navigate to header" [ref=e613] [cursor=pointer]:
+                - /url: "#skip-all-checks-with-bypasspermissions-mode"
+                - img [ref=e615]
+              - generic [ref=e617] [cursor=pointer]: Skip all checks with bypassPermissions mode
+            - generic [ref=e618]:
+              - code [ref=e619]: bypassPermissions
+              - text: mode disables permission prompts and safety checks so tool calls execute immediately. As of v2.1.126 this includes writes to
+              - link "protected paths" [ref=e620] [cursor=pointer]:
+                - /url: "#protected-paths"
+              - text: ", which earlier versions still prompted for. Explicit"
+              - link "ask rules" [ref=e621] [cursor=pointer]:
+                - /url: /docs/en/permissions#manage-permissions
+              - text: still force a prompt in this mode, and removals targeting the filesystem root or home directory, such as
+              - code [ref=e622]: rm -rf /
+              - text: and
+              - code [ref=e623]: rm -rf ~
+              - text: ", still prompt as a circuit breaker against model error. Only use this mode in isolated environments like containers, VMs, or dev containers without internet access, where Claude Code cannot damage your host system."
+            - generic [ref=e624]:
+              - text: You cannot enter
+              - code [ref=e625]: bypassPermissions
+              - text: "from a session that was started without one of the enabling flags; restart with one to enable it:"
+            - generic [ref=e626]:
+              - generic [ref=e627]:
+                - button "Report incorrect code" [ref=e629] [cursor=pointer]:
+                  - img [ref=e630]
+                - button "Copy the contents from the code block" [ref=e633] [cursor=pointer]:
+                  - img [ref=e634]
+                - button "Ask Assistant" [ref=e638] [cursor=pointer]:
+                  - img [ref=e639]
+              - code [ref=e645]:
+                - generic [ref=e646]: claude --permission-mode bypassPermissions
+            - generic [ref=e647]:
+              - text: The
+              - code [ref=e648]: "--dangerously-skip-permissions"
+              - text: flag is equivalent.
+            - generic [ref=e649]:
+              - text: On Linux and macOS, Claude Code refuses to start in this mode when running as root or under
+              - code [ref=e650]: sudo
+              - text: ":"
+            - generic [ref=e651]:
+              - generic [ref=e652]:
+                - button "Report incorrect code" [ref=e654] [cursor=pointer]:
+                  - img [ref=e655]
+                - button "Copy the contents from the code block" [ref=e658] [cursor=pointer]:
+                  - img [ref=e659]
+                - button "Ask Assistant" [ref=e663] [cursor=pointer]:
+                  - img [ref=e664]
+              - code [ref=e670]:
+                - generic [ref=e671]: "--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons"
+            - generic [ref=e672]:
+              - text: The check is skipped automatically inside a recognized sandbox. To run autonomously in a container, use the
+              - link "dev container" [ref=e673] [cursor=pointer]:
+                - /url: /docs/en/devcontainer
+              - text: configuration, which runs Claude Code as a non-root user.
+            - generic [ref=e674]:
+              - link "Claude Code on the web" [ref=e675] [cursor=pointer]:
+                - /url: /docs/en/claude-code-on-the-web
+              - text: does not honor
+              - code [ref=e676]: "defaultMode: \"bypassPermissions\""
+              - text: or
+              - code [ref=e677]: "\"dontAsk\""
+              - text: from your settings files, so a repository’s checked-in settings cannot start a cloud session in bypass-permissions mode. The setting is ignored silently and the session starts in the mode shown in the mode dropdown instead. See
+              - link "Switch permission modes" [ref=e678] [cursor=pointer]:
+                - /url: "#switch-permission-modes"
+              - text: for which modes cloud sessions offer.
+            - generic [ref=e679]:
+              - img "Warning" [ref=e681]
+              - generic [ref=e684]:
+                - code [ref=e685]: bypassPermissions
+                - text: offers no protection against prompt injection or unintended actions. For background safety checks with far fewer prompts, use
+                - link "auto mode" [ref=e686] [cursor=pointer]:
+                  - /url: "#eliminate-prompts-with-auto-mode"
+                - text: instead. Administrators can block this mode by setting
+                - code [ref=e687]: permissions.disableBypassPermissionsMode
+                - text: to
+                - code [ref=e688]: "\"disable\""
+                - text: in
+                - link "managed settings" [ref=e689] [cursor=pointer]:
+                  - /url: /docs/en/permissions#managed-settings
+                - text: .
+            - heading "Navigate to header Protected paths" [level=2] [ref=e690]:
+              - link "Navigate to header" [ref=e691] [cursor=pointer]:
+                - /url: "#protected-paths"
+                - img [ref=e693]
+              - generic [ref=e695] [cursor=pointer]: Protected paths
+            - generic [ref=e696]:
+              - text: Writes to a small set of paths are never auto-approved, in every mode except
+              - code [ref=e697]: bypassPermissions
+              - text: . This prevents accidental corruption of repository state and Claude’s own configuration.
+            - table [ref=e700]:
+              - rowgroup [ref=e701]:
+                - row "Mode Protected-path writes" [ref=e702]:
+                  - columnheader "Mode" [ref=e703]
+                  - columnheader "Protected-path writes" [ref=e704]
+              - rowgroup [ref=e705]:
+                - row "default, acceptEdits, plan Prompted" [ref=e706]:
+                  - cell "default, acceptEdits, plan" [ref=e707]:
+                    - code [ref=e708]: default
+                    - text: ","
+                    - code [ref=e709]: acceptEdits
+                    - text: ","
+                    - code [ref=e710]: plan
+                  - cell "Prompted" [ref=e711]
+                - row "auto Routed to the classifier" [ref=e712]:
+                  - cell "auto" [ref=e713]:
+                    - code [ref=e714]: auto
+                  - cell "Routed to the classifier" [ref=e715]
+                - row "dontAsk Denied" [ref=e716]:
+                  - cell "dontAsk" [ref=e717]:
+                    - code [ref=e718]: dontAsk
+                  - cell "Denied" [ref=e719]
+                - row "bypassPermissions Allowed" [ref=e720]:
+                  - cell "bypassPermissions" [ref=e721]:
+                    - code [ref=e722]: bypassPermissions
+                  - cell "Allowed" [ref=e723]
+            - generic [ref=e724]:
+              - link "permissions.allow" [ref=e725] [cursor=pointer]:
+                - /url: /docs/en/permissions#manage-permissions
+                - code [ref=e726]: permissions.allow
+              - text: rules in settings files do not pre-approve protected-path writes. The safety check runs before Claude Code evaluates allow rules from settings, so an entry such as
+              - code [ref=e727]: Edit(.claude/**)
+              - text: in
+              - code [ref=e728]: ~/.claude/settings.json
+              - text: or
+              - code [ref=e729]: .claude/settings.json
+              - text: does not change the per-mode outcome in the table above. In modes that prompt, the prompt for a
+              - code [ref=e730]: .claude/
+              - text: write offers
+              - strong [ref=e731]: Yes, and allow Claude to edit its own settings for this session
+              - text: ", which approves later"
+              - code [ref=e732]: .claude/
+              - text: writes in that session without prompting again.
+            - generic [ref=e733]: "Protected directories:"
+            - list [ref=e734]:
+              - listitem [ref=e735]:
+                - code [ref=e736]: .git
+              - listitem [ref=e737]:
+                - code [ref=e738]: .config/git
+              - listitem [ref=e739]:
+                - code [ref=e740]: .vscode
+              - listitem [ref=e741]:
+                - code [ref=e742]: .idea
+              - listitem [ref=e743]:
+                - code [ref=e744]: .husky
+              - listitem [ref=e745]:
+                - code [ref=e746]: .cargo
+              - listitem [ref=e747]:
+                - code [ref=e748]: .devcontainer
+              - listitem [ref=e749]:
+                - code [ref=e750]: .yarn
+              - listitem [ref=e751]:
+                - code [ref=e752]: .mvn
+              - listitem [ref=e753]:
+                - code [ref=e754]: .claude
+                - text: ", except for"
+                - code [ref=e755]: .claude/worktrees
+                - text: where Claude stores its own git worktrees
+            - generic [ref=e756]: "Protected files:"
+            - list [ref=e757]:
+              - listitem [ref=e758]:
+                - code [ref=e759]: .gitconfig
+                - text: ","
+                - code [ref=e760]: .gitmodules
+              - listitem [ref=e761]:
+                - code [ref=e762]: .bashrc
+                - text: ","
+                - code [ref=e763]: .bash_profile
+                - text: ","
+                - code [ref=e764]: .bash_login
+                - text: ","
+                - code [ref=e765]: .bash_aliases
+                - text: ","
+                - code [ref=e766]: .bash_logout
+                - text: ","
+                - code [ref=e767]: .zshrc
+                - text: ","
+                - code [ref=e768]: .zprofile
+                - text: ","
+                - code [ref=e769]: .zshenv
+                - text: ","
+                - code [ref=e770]: .zlogin
+                - text: ","
+                - code [ref=e771]: .zlogout
+                - text: ","
+                - code [ref=e772]: .profile
+                - text: ","
+                - code [ref=e773]: .envrc
+              - listitem [ref=e774]:
+                - code [ref=e775]: .npmrc
+                - text: ","
+                - code [ref=e776]: .yarnrc
+                - text: ","
+                - code [ref=e777]: .yarnrc.yml
+                - text: ","
+                - code [ref=e778]: .pnp.cjs
+                - text: ","
+                - code [ref=e779]: .pnp.loader.mjs
+                - text: ","
+                - code [ref=e780]: .pnpmfile.cjs
+                - text: ","
+                - code [ref=e781]: bunfig.toml
+                - text: ","
+                - code [ref=e782]: .bunfig.toml
+              - listitem [ref=e783]:
+                - code [ref=e784]: .bazelrc
+                - text: ","
+                - code [ref=e785]: .bazelversion
+                - text: ","
+                - code [ref=e786]: .bazeliskrc
+              - listitem [ref=e787]:
+                - code [ref=e788]: .pre-commit-config.yaml
+                - text: ","
+                - code [ref=e789]: lefthook.yml
+                - text: ","
+                - code [ref=e790]: lefthook.yaml
+                - text: ","
+                - code [ref=e791]: .lefthook.yml
+                - text: ","
+                - code [ref=e792]: .lefthook.yaml
+              - listitem [ref=e793]:
+                - code [ref=e794]: gradle-wrapper.properties
+                - text: ","
+                - code [ref=e795]: maven-wrapper.properties
+              - listitem [ref=e796]:
+                - code [ref=e797]: .devcontainer.json
+              - listitem [ref=e798]:
+                - code [ref=e799]: .ripgreprc
+                - text: ","
+                - code [ref=e800]: pyrightconfig.json
+              - listitem [ref=e801]:
+                - code [ref=e802]: .mcp.json
+                - text: ","
+                - code [ref=e803]: .claude.json
+            - heading "Navigate to header See also" [level=2] [ref=e804]:
+              - link "Navigate to header" [ref=e805] [cursor=pointer]:
+                - /url: "#see-also"
+                - img [ref=e807]
+              - generic [ref=e809] [cursor=pointer]: See also
+            - list [ref=e810]:
+              - listitem [ref=e811]:
+                - link "Permissions" [ref=e812] [cursor=pointer]:
+                  - /url: /docs/en/permissions
+                - text: ": allow, ask, and deny rules; managed policies"
+              - listitem [ref=e813]:
+                - link "Configure auto mode" [ref=e814] [cursor=pointer]:
+                  - /url: /docs/en/auto-mode-config
+                - text: ": tell the classifier which infrastructure your organization trusts"
+              - listitem [ref=e815]:
+                - link "Hooks" [ref=e816] [cursor=pointer]:
+                  - /url: /docs/en/hooks
+                - text: ": custom permission logic via"
+                - code [ref=e817]: PreToolUse
+                - text: and
+                - code [ref=e818]: PermissionRequest
+                - text: hooks
+              - listitem [ref=e819]:
+                - link "Ultraplan" [ref=e820] [cursor=pointer]:
+                  - /url: /docs/en/ultraplan
+                - text: ": run plan mode in a Claude Code on the web session with browser-based review"
+              - listitem [ref=e821]:
+                - link "Security" [ref=e822] [cursor=pointer]:
+                  - /url: /docs/en/security
+                - text: ": safeguards and best practices"
+              - listitem [ref=e823]:
+                - link "Sandboxing" [ref=e824] [cursor=pointer]:
+                  - /url: /docs/en/sandboxing
+                - text: ": filesystem and network isolation for Bash commands"
+              - listitem [ref=e825]:
+                - link "Non-interactive mode" [ref=e826] [cursor=pointer]:
+                  - /url: /docs/en/headless
+                - text: ": run Claude Code with the"
+                - code [ref=e827]: "-p"
+                - text: flag
+          - generic [ref=e829]:
+            - paragraph [ref=e830]: Was this page helpful?
+            - generic [ref=e832]:
+              - button "Yes" [ref=e833] [cursor=pointer]:
+                - img [ref=e834]
+                - generic [ref=e836]: "Yes"
+              - button "No" [ref=e837] [cursor=pointer]:
+                - img [ref=e838]
+                - generic [ref=e840]: "No"
+          - generic [ref=e841]:
+            - link "Store instructions and memories" [ref=e842] [cursor=pointer]:
+              - /url: /docs/en/memory
+              - img [ref=e843]
+              - generic [ref=e845]: Store instructions and memories
+            - link "Manage sessions" [ref=e846] [cursor=pointer]:
+              - /url: /docs/en/sessions
+              - generic [ref=e847]: Manage sessions
+              - img [ref=e848]
+          - generic [ref=e851]:
+            - textbox "Ask a question..." [ref=e852]
+            - generic: ⌘I
+            - button "Send message" [disabled] [ref=e853]:
+              - img [ref=e854]
+      - contentinfo [ref=e856]:
+        - generic [ref=e858]:
+          - generic [ref=e859]:
+            - link "Claude Code Docs home page light logo" [ref=e860] [cursor=pointer]:
+              - /url: /docs/en/overview
+              - generic [ref=e861]: Claude Code Docs home page
+              - img "light logo" [ref=e862]
+            - generic [ref=e863]:
+              - link "x" [ref=e864] [cursor=pointer]:
+                - /url: https://x.com/AnthropicAI
+                - generic [ref=e865]: x
+                - img [ref=e866]
+              - link "linkedin" [ref=e867] [cursor=pointer]:
+                - /url: https://www.linkedin.com/company/anthropicresearch
+                - generic [ref=e868]: linkedin
+                - img [ref=e869]
+          - generic [ref=e870]:
+            - generic [ref=e872]:
+              - paragraph [ref=e873]: Company
+              - link "Anthropic" [ref=e874] [cursor=pointer]:
+                - /url: https://www.anthropic.com/company
+              - link "Careers" [ref=e875] [cursor=pointer]:
+                - /url: https://www.anthropic.com/careers
+              - link "Economic Futures" [ref=e876] [cursor=pointer]:
+                - /url: https://www.anthropic.com/economic-futures
+              - link "Research" [ref=e877] [cursor=pointer]:
+                - /url: https://www.anthropic.com/research
+              - link "News" [ref=e878] [cursor=pointer]:
+                - /url: https://www.anthropic.com/news
+              - link "Trust center" [ref=e879] [cursor=pointer]:
+                - /url: https://trust.anthropic.com/
+              - link "Transparency" [ref=e880] [cursor=pointer]:
+                - /url: https://www.anthropic.com/transparency
+            - generic [ref=e882]:
+              - paragraph [ref=e883]: Help and security
+              - link "Availability" [ref=e884] [cursor=pointer]:
+                - /url: https://www.anthropic.com/supported-countries
+              - link "Status" [ref=e885] [cursor=pointer]:
+                - /url: https://status.anthropic.com/
+              - link "Support center" [ref=e886] [cursor=pointer]:
+                - /url: https://support.claude.com/
+            - generic [ref=e888]:
+              - paragraph [ref=e889]: Learn
+              - link "Courses" [ref=e890] [cursor=pointer]:
+                - /url: https://www.anthropic.com/learn
+              - link "MCP connectors" [ref=e891] [cursor=pointer]:
+                - /url: https://claude.com/partners/mcp
+              - link "Customer stories" [ref=e892] [cursor=pointer]:
+                - /url: https://www.claude.com/customers
+              - link "Engineering blog" [ref=e893] [cursor=pointer]:
+                - /url: https://www.anthropic.com/engineering
+              - link "Events" [ref=e894] [cursor=pointer]:
+                - /url: https://www.anthropic.com/events
+              - link "Powered by Claude" [ref=e895] [cursor=pointer]:
+                - /url: https://claude.com/partners/powered-by-claude
+              - link "Service partners" [ref=e896] [cursor=pointer]:
+                - /url: https://claude.com/partners/services
+              - link "Startups program" [ref=e897] [cursor=pointer]:
+                - /url: https://claude.com/programs/startups
+            - generic [ref=e899]:
+              - paragraph [ref=e900]: Terms and policies
+              - link "Privacy choices" [ref=e901] [cursor=pointer]:
+                - /url: https://www.anthropic.com/legal/privacy
+              - link "Privacy policy" [ref=e902] [cursor=pointer]:
+                - /url: https://www.anthropic.com/legal/privacy
+              - link "Disclosure policy" [ref=e903] [cursor=pointer]:
+                - /url: https://www.anthropic.com/responsible-disclosure-policy
+              - link "Usage policy" [ref=e904] [cursor=pointer]:
+                - /url: https://www.anthropic.com/legal/aup
+              - link "Commercial terms" [ref=e905] [cursor=pointer]:
+                - /url: https://www.anthropic.com/legal/commercial-terms
+              - link "Consumer terms" [ref=e906] [cursor=pointer]:
+                - /url: https://www.anthropic.com/legal/consumer-terms
