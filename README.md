@@ -15,7 +15,7 @@ The deployed Hermes backend lives at `AppData\Local\hermes\hermes-agent\venv`. T
 | **Host OS** | Windows 11 — WSL2 runs the agent; Windows is the target platform |
 | **Launcher** | `run-hermes.bat` — batch script for CLI / web dashboard / Discord gateway |
 | **Sub-agents / MCP** | Critic MCP server (independent repository), Foundry Manager MCP (Orchestration) |
-| **Versioning** | Git → GitHub (`Reese000/Hermes-Agent`) |
+| **Versioning** | Git → GitHub (`Reese000/hermes-agent`) |
 
 ---
 
@@ -86,18 +86,40 @@ Cost discipline — the agent exclusively routes through DeepSeek's backend on O
 
 ---
 
+## Interconnectedness
+
+### Relationship to `hermes-chat-delegator`
+
+The `hermes-chat-delegator` is a separate MCP client project elsewhere in the workspace. It provides the `chat_delegator` MCP tool set that this Hermes agent uses to create, manage, and prompt GUI chat sessions — effectively the bridge between this agent's runtime and the Hermes desktop app's chat surface. The delegator connects to the Hermes backend (the deployed instance at `AppData\Local\hermes`), not this source repo.
+
+### Deployment Model
+
+This source folder (`C:\Users\reese\Projects\Hermes Agent`) is the **development / definition** copy. The actual running Hermes backend is installed at `C:\Users\reese\AppData\Local\hermes\hermes-agent\venv\` and runs as a Windows service / desktop app. Configuration changes from this repo (system prompt updates, `lessons_learned.md` entries) are synced to the deployment independently — this repo is the source of truth for *what the agent should be*, not the installation itself.
+
+### Other MCP Servers Referenced
+
+- **Critic MCP server** — an independent repository at `Projects/Agent MCP (critic)/` providing debate, critique, visual analysis, and parallel orchestration tools
+- **Foundry Manager MCP** — orchestration and task management at `Projects/Foundry Manager/`
+- **MACO Swarm** — heavy-duty multi-agent coordination (10+ ticket waves) located at `Agent MCP (critic)/`
+
+### Self-Evolution Sub-Project
+
+The `hermes-agent-self-evolution/` directory contains an experimental sub-project for evolving agent skills using DSPy + Optuna. It has its own git repo, venv, and .gitignore. It is excluded from the parent repo's tracking.
+
+---
+
 ## Current Status
 
 | Aspect | Status |
 |--------|--------|
-| Agent runtime | ✅ **Deployed and running** (live python.exe processes) |
+| Agent runtime | ✅ **Deployed and running** (multiple live python.exe processes) |
 | Provider routing | ✅ DeepSeek-only enforced at config + auxiliary levels |
 | Three-Gate workflow | ✅ Operational — debate, execute, critique all working |
 | Discord gateway | ✅ Operational with systemd-based management |
 | Web dashboard | ✅ Operational on port 8080 |
-| Visual oracle verification | 🔄 Partial — CAM CSG and Nesting CP-SAT oracles exist; pixel-diff oracle is future |
+| Visual oracle verification | 🔄 Partial — CAM CSG and Nesting CP-SAT oracles exist; Rendering pixel-diff oracle is future |
 | Self-evolution experiment | ⚪ Experimental — DSPy-based skill evolution, limited results |
-| Proxy streaming | ✅ Fixed — full SSE tool_calls-to-Anthropic content block conversion |
+| Proxy streaming | ✅ Fixed — full SSE tool_calls → Anthropic content block conversion |
 | Pre-commit hook | ✅ Installed but needs `git config core.hooksPath .githooks` |
 
 ---
