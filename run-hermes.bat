@@ -46,11 +46,11 @@ echo ========================================
 echo       Hermes Discord Gateway
 echo ========================================
 echo.
-wsl hermes gateway start 2>nul
+wsl sudo hermes gateway start --system 2>nul
 timeout /t 2 /nobreak >nul
 echo Checking status...
 echo.
-wsl hermes gateway status
+wsl hermes gateway status --system
 echo.
 echo Bot should now be online as ^'Hermes Agent#7835^'.
 echo.
@@ -63,7 +63,7 @@ echo ========================================
 echo     Stopping Discord Gateway
 echo ========================================
 echo.
-wsl hermes gateway stop 2>nul
+wsl sudo hermes gateway stop --system 2>nul
 echo Stopped.
 echo.
 pause
@@ -75,11 +75,11 @@ echo ========================================
 echo    Restarting Discord Gateway
 echo ========================================
 echo.
-wsl hermes gateway restart 2>nul
+wsl sudo hermes gateway restart --system 2>nul
 timeout /t 2 /nobreak >nul
 echo Checking status...
 echo.
-wsl hermes gateway status
+wsl hermes gateway status --system
 echo.
 pause
 goto status
@@ -90,7 +90,7 @@ echo ========================================
 echo       Gateway Status
 echo ========================================
 echo.
-wsl hermes gateway status
+wsl hermes gateway status --system
 echo.
 pause
 exit /b 0
