@@ -183,12 +183,7 @@ export function ComposerControls({
                   `[&>*]:!inline-flex` rule which otherwise collapses both
                   spans onto one line. The hint line uses 9px italic faded
                   text to visually de-emphasize it. ──────────────────────── */}
-              <Tip label={enhancing ? c.enhancing : (
-                <>
-                  <span className="!block">{c.enhance} — {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
-                  <span className="!block text-[9px] italic opacity-60">right-click to configure</span>
-                </>
-              )}>
+              <Tip label={enhancing ? c.enhancing : `${c.enhance} — ${displayModelName(enhanceModel)} · ${reasoningEffortLabel(enhanceReasoning)} — right-click to configure`}>
                 <Button
                   aria-label={enhancing ? c.enhancing : c.enhance}
                   className={cn(GHOST_ICON_BTN, 'p-0')}
