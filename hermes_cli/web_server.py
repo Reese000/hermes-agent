@@ -108,7 +108,7 @@ try:
         WebSocket, WebSocketDisconnect,
     )
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel, SecretStr, field_validator
     from starlette.concurrency import run_in_threadpool
@@ -6671,6 +6671,251 @@ def set_moa_models(body: MoaConfigPayload, profile: Optional[str] = None):
     except Exception:
         _log.exception("PUT /api/model/moa failed")
         raise HTTPException(status_code=500, detail="Failed to save MoA config")
+
+
+# ── Prompt Enhancement ────────────────────────────────────────────────────
+_enhance_prompt_last_call: dict = {}
+_ENHANCE_PROMPT_MIN_INTERVAL = 3.0
+_ENHANCE_PROMPT_DEFAULT_MODEL = "xiaomi/mimo-v2.5"
+_ENHANCE_PROMPT_DEFAULT_PROVIDER = "openrouter"
+_ENHANCE_PROMPT_MAX_INPUT = 10000
+
+
+@app.post("/api/model/enhance-prompt")
+async def enhance_prompt(body: dict, profile: Optional[str] = None):
+    """Rewrite the user's prompt for clarity and effectiveness (non-streaming)."""
+    text = str(body.get("prompt", "") or "").strip()
+    session_id = str(body.get("session_id", "") or "").strip() or None
+
+    if not text and not session_id:
+        return {"enhanced": "", "ok": True}
+
+    import time as _time
+    client_key = session_id or "anon"
+    now = _time.monotonic()
+    last = _enhance_prompt_last_call.get(client_key, 0.0)
+    if now - last < _ENHANCE_PROMPT_MIN_INTERVAL:
+        return {"enhanced": text, "ok": False, "error": "rate_limited"}
+    _enhance_prompt_last_call[client_key] = now
+    if len(_enhance_prompt_last_call) > 200:
+        cutoff = now - 60
+        stale = [k for k, v in _enhance_prompt_last_call.items() if v < cutoff]
+        for k in stale:
+            _enhance_prompt_last_call.pop(k, None)
+
+    if text and len(text) > _ENHANCE_PROMPT_MAX_INPUT:
+        return {"enhanced": text, "ok": False, "error": "text_too_long"}
+
+    try:
+        mesgs, provider_kw, model_kw, main_runtime, max_tokens = _build_enhance_context(text, session_id)
+    except Exception as exc:
+        return {"enhanced": text, "ok": False, "error": str(exc)[:200]}
+
+    try:
+        from agent.auxiliary_client import call_llm
+        resp = call_llm(
+            task="prompt_enhance", **provider_kw, **model_kw,
+            messages=mesgs, temperature=0.3, max_tokens=max_tokens,
+            timeout=120, main_runtime=main_runtime,
+        )
+        enhanced = (resp.choices[0].message.content or "").strip()
+        if not enhanced:
+            return {"enhanced": text, "ok": False, "error": "empty_response"}
+        return {"enhanced": enhanced, "ok": True}
+    except Exception as exc:
+        _log.debug("prompt_enhance: aux call failed", exc_info=True)
+        return {"enhanced": text, "ok": False, "error": str(exc)[:200]}
+
+
+def _build_enhance_context(text: str, session_id: Optional[str]):
+    """Build messages, kwargs, and config for the enhance LLM call."""
+    import time as _et
+    _et0 = _et.monotonic()
+
+    context_block = ""
+    project_ctx = ""
+    project_dir = ""
+    system_prompt_suffix = ""
+
+    if session_id:
+        try:
+            from hermes_state import SessionDB
+            db = SessionDB(read_only=True)
+            try:
+                sid = db.resolve_session_id(session_id)
+                if sid:
+                    session = db.get_session(sid)
+                    if session:
+                        cwd = str(session.get("cwd", "") or "")
+                        git_root = str(session.get("git_repo_root", "") or "")
+                        project_dir = git_root or cwd
+                        sys_prompt = str(session.get("system_prompt", "") or "")
+                        if sys_prompt and len(sys_prompt) > 50:
+                            sp_block = sys_prompt[:1000] if len(sys_prompt) > 1000 else sys_prompt
+                            system_prompt_suffix = (
+                                "Agent system prompt (memory/rules):\n" + sp_block
+                            )
+                    conv = db.get_messages_as_conversation(sid, repair_alternation=True)
+                    if conv and len(conv) > 2:
+                        recent = conv[-5:]
+                        lines: list[str] = []
+                        for m in recent:
+                            role = str(m.get("role", "") or "")
+                            if role not in ("user", "assistant"):
+                                continue
+                            content = str(m.get("content", "") or "")
+                            if not content.strip():
+                                continue
+                            if len(content) > 300:
+                                content = content[:300] + "…"
+                            lines.append(f"[{role}]: {content}")
+                        if lines:
+                            context_block = "Recent conversation:\n" + "\n".join(lines)
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    _et1 = _et.monotonic()
+    _log.warning(f"[enhance-timing] context_gather={(_et1-_et0)*1000:.0f}ms")
+
+    is_empty = not text
+    system_parts = [
+        "Refine the user's prompt for the agent. Rules:",
+        "• IMPROVE it — don't echo or drift.",
+        "• Match their style (terse → terse, specific → specific).",
+        "• Use exact terms from conversation context.",
+        "• Name files/functions/configs explicitly.",
+        "• Never add politeness, hedges, or padding.",
+        "• Never ask questions — output only the refined prompt.",
+        "OUTPUT: Only the prompt text.",
+    ]
+
+    if is_empty:
+        system_parts.insert(0, "User submitted EMPTY prompt. Generate next logical request from context.\n")
+
+    if context_block:
+        system_parts.append("\n─── CONVERSATION ───\n" + context_block)
+    if system_prompt_suffix:
+        system_parts.append("\n─── AGENT ───\n" + system_prompt_suffix)
+
+    system_prompt = "\n".join(system_parts)
+    mesgs: list = [{"role": "system", "content": system_prompt}]
+    if text:
+        mesgs.append({"role": "user", "content": text})
+    else:
+        mesgs.append({"role": "user", "content": "Generate the next prompt based on conversation context."})
+
+    main_runtime = _build_main_runtime_from_config()
+
+    provider_kw = {}
+    model_kw = {}
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config() or {}
+        aux = cfg.get("auxiliary", {}) if isinstance(cfg, dict) else {}
+        enhance_cfg = aux.get("prompt_enhance", {})
+        configured_provider = str(enhance_cfg.get("provider", "") or "").strip()
+        configured_model = str(enhance_cfg.get("model", "") or "").strip()
+        if configured_provider and configured_provider not in ("", "auto"):
+            provider_kw["provider"] = configured_provider
+        if configured_model:
+            model_kw["model"] = configured_model
+    except Exception:
+        pass
+
+    if not model_kw:
+        model_kw["model"] = _ENHANCE_PROMPT_DEFAULT_MODEL
+    if not provider_kw:
+        provider_kw["provider"] = _ENHANCE_PROMPT_DEFAULT_PROVIDER
+
+    max_tokens = min(len(text) * 2, 800)
+
+    _et2 = _et.monotonic()
+    _log.warning(f"[enhance-timing] prompt_build={(_et2-_et1)*1000:.0f}ms total={(_et2-_et0)*1000:.0f}ms")
+    return mesgs, provider_kw, model_kw, main_runtime, max_tokens
+
+
+@app.post("/api/model/enhance-prompt-stream")
+async def enhance_prompt_stream(body: dict, profile: Optional[str] = None):
+    """Streaming enhance — returns SSE text/event-stream."""
+    text = str(body.get("prompt", "") or "").strip()
+    session_id = str(body.get("session_id", "") or "").strip() or None
+
+    if not text and not session_id:
+        async def empty():
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(empty(), media_type="text/event-stream")
+
+    import time as _time
+    client_key = session_id or "anon"
+    now = _time.monotonic()
+    last = _enhance_prompt_last_call.get(client_key, 0.0)
+    if now - last < _ENHANCE_PROMPT_MIN_INTERVAL:
+        async def rate_limited():
+            yield f"data: {json.dumps({'error': 'rate_limited'})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(rate_limited(), media_type="text/event-stream")
+    _enhance_prompt_last_call[client_key] = now
+
+    if text and len(text) > _ENHANCE_PROMPT_MAX_INPUT:
+        async def too_long():
+            yield f"data: {json.dumps({'error': 'text_too_long'})}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(too_long(), media_type="text/event-stream")
+
+    async def event_generator():
+        import time as _et
+        _et0 = _et.monotonic()
+
+        try:
+            from starlette.concurrency import run_in_threadpool
+            mesgs, provider_kw, model_kw, main_runtime, max_tokens = \
+                await run_in_threadpool(_build_enhance_context, text, session_id)
+        except Exception as exc:
+            yield f"data: {json.dumps({'error': str(exc)[:200]})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        try:
+            from agent.auxiliary_client import call_llm
+            _et3 = _et.monotonic()
+            _log.warning(f"[enhance-timing] before_call_llm={(_et3-_et0)*1000:.0f}ms")
+            stream = call_llm(
+                task="prompt_enhance", **provider_kw, **model_kw,
+                messages=mesgs, temperature=0.3, max_tokens=max_tokens,
+                timeout=120, main_runtime=main_runtime,
+                stream=True, stream_options={"include_usage": True},
+            )
+
+            from itertools import repeat
+            sentinel = object()
+            _first = True
+            for _ in repeat(None):
+                chunk = await run_in_threadpool(next, stream, sentinel)
+                if chunk is sentinel:
+                    break
+                if hasattr(chunk, "choices") and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        if _first:
+                            _et4 = _et.monotonic()
+                            _log.warning(f"[enhance-timing] TTFT={(_et4-_et3)*1000:.0f}ms start={(_et4-_et0)*1000:.0f}ms")
+                            _first = False
+                        yield f"data: {json.dumps({'text': delta.content})}\n\n"
+                        await asyncio.sleep(0)
+
+            yield "data: [DONE]\n\n"
+        except Exception as exc:
+            _log.debug("prompt_enhance-stream: aux call failed", exc_info=True)
+            yield f"data: {json.dumps({'error': str(exc)[:200]})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/model/set")
