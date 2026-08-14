@@ -3,10 +3,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Radix Select calls scrollIntoView on its items when the content opens; jsdom
-// doesn't implement it (nor hasPointerCapture / releasePointerCapture), so stub
-// them to let the dropdown open in tests.
+// Radix Select/Dialog + cmdk (inside ModelPickerDialog) call scrollIntoView /
+// pointer-capture / ResizeObserver APIs jsdom lacks.
+class TestResizeObserver {
+  disconnect() {}
+  observe() {}
+  unobserve() {}
+}
+
 beforeAll(() => {
+  vi.stubGlobal('ResizeObserver', TestResizeObserver)
   Element.prototype.scrollIntoView = vi.fn()
   Element.prototype.hasPointerCapture = vi.fn(() => false)
   Element.prototype.releasePointerCapture = vi.fn()
@@ -25,6 +31,7 @@ const saveHermesConfig = vi.fn()
 const startManualLocalEndpoint = vi.fn()
 const startManualOnboarding = vi.fn()
 const startManualProviderOAuth = vi.fn()
+const searchProviderModels = vi.fn()
 let profileSwitchHandler: (() => void) | null = null
 
 vi.mock('@/hermes', () => ({
@@ -39,6 +46,7 @@ vi.mock('@/hermes', () => ({
   setEnvVar: (key: string, value: string) => setEnvVar(key, value),
   getHermesConfigRecord: () => getHermesConfigRecord(),
   saveHermesConfig: (config: unknown) => saveHermesConfig(config),
+  searchProviderModels: (provider: string, query: string) => searchProviderModels(provider, query),
   setApiRequestProfile: () => {}
 }))
 
@@ -77,6 +85,7 @@ beforeEach(() => {
   setEnvVar.mockResolvedValue({ ok: true })
   getHermesConfigRecord.mockResolvedValue({ agent: { reasoning_effort: 'medium', service_tier: 'normal' } })
   saveHermesConfig.mockResolvedValue({ ok: true })
+  searchProviderModels.mockResolvedValue({ models: [] })
 })
 
 afterEach(() => {
@@ -107,11 +116,9 @@ describe('ModelSettings', () => {
     await waitFor(() => expect(getGlobalModelInfo).toHaveBeenCalled())
     await waitFor(() => expect(getGlobalModelOptions).toHaveBeenCalled())
 
-    // Open the provider Select — only configured providers should be listed.
-    const triggers = await screen.findAllByRole('combobox')
-    fireEvent.click(triggers[0])
+    // Open the model picker dialog — only configured providers should be listed.
+    fireEvent.click(await screen.findByRole('button', { name: 'nous · hermes-4' }))
 
-    // "Nous" shows in both the trigger and the open list.
     expect((await screen.findAllByText('Nous')).length).toBeGreaterThan(0)
     expect(screen.queryByText(/DeepSeek/)).toBeNull()
   })
@@ -124,9 +131,7 @@ describe('ModelSettings', () => {
 
       await renderModelSettings()
 
-      const providerSelect = (await screen.findAllByRole('combobox'))[0]
-
-      expect(providerSelect.textContent).toContain(provider)
+      await screen.findByRole('button', { name: 'Set up provider' })
       expect(screen.queryByText(/undefined/)).toBeNull()
       expect(screen.queryByText(/signs in through your browser/)).toBeNull()
 
@@ -202,19 +207,22 @@ describe('ModelSettings', () => {
       })
 
     await renderModelSettings()
-    expect((await screen.findAllByRole('combobox'))[0].textContent).toContain('Custom A')
+    await screen.findByRole('button', { name: 'custom · local-a' })
 
     await act(async () => {
       profileSwitchHandler?.()
     })
 
     await waitFor(() => expect(getGlobalModelInfo).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(screen.getAllByRole('combobox')[0].textContent).toContain('Nous'))
+    await screen.findByRole('button', { name: 'nous · hermes-4' })
     expect(screen.queryByRole('button', { name: 'Set up provider' })).toBeNull()
   })
 
   it('preserves a user-defined provider endpoint when applying the main model', async () => {
-    getGlobalModelOptions.mockResolvedValueOnce({
+    // Persistent (not -Once): ModelSettings' own initial load and
+    // ModelPickerDialog's independent query both call getGlobalModelOptions,
+    // and both need Ollama in the response for the dialog to offer it.
+    getGlobalModelOptions.mockResolvedValue({
       providers: [
         {
           name: 'Nous',
@@ -241,13 +249,8 @@ describe('ModelSettings', () => {
 
     await renderModelSettings()
 
-    const providerSelect = (await screen.findAllByRole('combobox'))[0]
-    fireEvent.click(providerSelect)
-    fireEvent.click(await screen.findByRole('option', { name: 'Ollama' }))
-
-    const modelSelect = (await screen.findAllByRole('combobox'))[1]
-    fireEvent.click(modelSelect)
-    fireEvent.click(await screen.findByRole('option', { name: 'qwen3:latest' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'nous · hermes-4' }))
+    fireEvent.click(await screen.findByText('qwen3:latest'))
 
     fireEvent.click(await screen.findByRole('button', { name: 'Apply' }))
 
@@ -514,8 +517,13 @@ describe('ModelSettings MoA preset editor', () => {
 
       // Radix treats re-picking the current value as a no-op (no
       // onValueChange), so nothing changes: no save, model still shown.
+      // Match the Reference 1 slot's description span specifically — the
+      // main-model button above it renders the identical "provider · model"
+      // text for its own selection, and would collide with a plain getByText.
       expect(saveMoaModels).not.toHaveBeenCalled()
-      expect(screen.getByText('nous · hermes-4')).toBeTruthy()
+      expect(
+        screen.getByText((_, element) => element?.tagName === 'SPAN' && element.textContent === 'nous · hermes-4')
+      ).toBeTruthy()
     } finally {
       vi.useRealTimers()
     }
