@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { ModelPickerDialog } from '@/components/model-picker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -37,6 +38,7 @@ import { useOnProfileSwitch } from '../hooks/use-on-profile-switch'
 import { CONTROL_TEXT } from './constants'
 import { getNested, setNested } from './helpers'
 import { ListRow, Pill, SectionHeading } from './primitives'
+import { SearchableSelect } from './searchable-select'
 import { useDeepLinkHighlight } from './use-deep-link-highlight'
 
 // Skeleton mirror of the Model settings DOM so the page keeps its shape while
@@ -115,7 +117,9 @@ const AUX_TASKS: readonly AuxTaskMeta[] = [
   { key: 'approval' },
   { key: 'mcp' },
   { key: 'title_generation' },
-  { key: 'curator' }
+  { key: 'subagent' },
+  { key: 'curator' },
+  { key: 'prompt_enhance' }
 ]
 
 const NO_PROVIDERS: readonly ModelOptionProvider[] = [{ name: '—', slug: '', models: [] }]
@@ -190,6 +194,7 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
   const [error, setError] = useState('')
   const [mainModel, setMainModel] = useState<{ model: string; provider: string } | null>(null)
   const [providers, setProviders] = useState<ModelOptionProvider[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [selectedProvider, setSelectedProvider] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
   const [auxiliary, setAuxiliary] = useState<AuxiliaryModelsResponse | null>(null)
@@ -291,17 +296,6 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
   })
 
   const providerOptions = providers.length ? providers : NO_PROVIDERS
-
-  // Radix renders a blank trigger when the controlled value has no matching
-  // item. Keep a missing saved provider visible in the main selector while
-  // leaving it out of the real inventory used for readiness/setup metadata.
-  const mainProviderOptions = useMemo(
-    () =>
-      selectedProvider && !providers.some(provider => provider.slug === selectedProvider)
-        ? [{ name: selectedProvider, slug: selectedProvider, models: [] }, ...providers]
-        : providerOptions,
-    [providerOptions, providers, selectedProvider]
-  )
 
   // MoA reference/aggregator slots must never be the moa virtual provider —
   // that would create a recursive MoA tree (the backend rejects it on save).
@@ -759,19 +753,21 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
       <section>
         <p className="mb-3 text-xs text-muted-foreground">{m.appliesDesc}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <Select onValueChange={setSelectedProvider} value={selectedProvider}>
-            <SelectTrigger className={cn('min-w-40', CONTROL_TEXT)}>
-              <SelectValue placeholder={m.provider} />
-            </SelectTrigger>
-            <SelectContent>
-              {mainProviderOptions.map(provider => (
-                <SelectItem key={provider.slug || 'none'} value={provider.slug || 'none'}>
-                  {provider.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {needsSetup ? (
+          {selectedProvider && selectedModel ? (
+            <>
+              <Button onClick={() => setPickerOpen(true)} size="sm" variant="outline">
+                {selectedProvider} &middot; {selectedModel}
+              </Button>
+              <Button
+                disabled={applying}
+                onClick={() => void applyMainModel()}
+                size="sm"
+              >
+                {applying && <Loader2 className="size-3.5 animate-spin" />}
+                {applying ? m.applying : t.common.apply}
+              </Button>
+            </>
+          ) : needsSetup ? (
             setupIsApiKey ? (
               <>
                 <Input
@@ -802,29 +798,21 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
               </Button>
             )
           ) : (
-            <>
-              <Select onValueChange={setSelectedModel} value={selectedModel}>
-                <SelectTrigger className={cn('min-w-60', CONTROL_TEXT)}>
-                  <SelectValue placeholder={m.model} />
-                </SelectTrigger>
-                <SelectContent>
-                  {withActive(selectedProviderModels, selectedModel).map(model => (
-                    <SelectItem key={model} value={model}>
-                      {model}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                disabled={!selectedProvider || !selectedModel || applying}
-                onClick={() => void applyMainModel()}
-                size="sm"
-              >
-                {applying && <Loader2 className="size-3.5 animate-spin" />}
-                {applying ? m.applying : t.common.apply}
-              </Button>
-            </>
+            <Button onClick={() => setPickerOpen(true)} size="sm">
+              {m.change}
+            </Button>
           )}
+          <ModelPickerDialog
+            contentClassName="z-(--z-onboarding-popover)"
+            currentModel={selectedModel}
+            currentProvider={selectedProvider}
+            onOpenChange={setPickerOpen}
+            onSelect={({ provider, model }) => {
+              setSelectedProvider(provider)
+              setSelectedModel(model)
+            }}
+            open={pickerOpen}
+          />
         </div>
         {needsSetup && !setupIsApiKey && selectedProviderRow && (
           <p className="mt-2 text-xs text-muted-foreground">
@@ -939,36 +927,20 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
                   below={
                     isEditing && (
                       <div className="mt-2 flex flex-wrap items-center gap-2 pt-1">
-                        <Select
-                          onValueChange={value => setAuxDraft(prev => ({ ...prev, provider: value, model: '' }))}
+                        <SearchableSelect
+                          onChange={value => setAuxDraft(prev => ({ ...prev, provider: value, model: '' }))}
+                          options={providerOptions.map(p => p.slug || 'none')}
+                          placeholder={m.provider}
                           value={auxDraft.provider}
-                        >
-                          <SelectTrigger className={cn('min-w-32', CONTROL_TEXT)}>
-                            <SelectValue placeholder={m.provider} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {providerOptions.map(provider => (
-                              <SelectItem key={provider.slug || 'none'} value={provider.slug || 'none'}>
-                                {provider.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Select
-                          onValueChange={value => setAuxDraft(prev => ({ ...prev, model: value }))}
+                        />
+                        <SearchableSelect
+                          liveSearchProvider={auxDraft.provider}
+                          onChange={value => setAuxDraft(prev => ({ ...prev, model: value }))}
+                          options={withActive(auxDraftProviderModels, auxDraft.model)}
+                          placeholder={m.model}
+                          pricing={providers.find(p => p.slug === auxDraft.provider)?.pricing}
                           value={auxDraft.model}
-                        >
-                          <SelectTrigger className={cn('min-w-48', CONTROL_TEXT)}>
-                            <SelectValue placeholder={m.model} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {withActive(auxDraftProviderModels, auxDraft.model).map(model => (
-                              <SelectItem key={model} value={model}>
-                                {model}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        />
                         <Button
                           disabled={!auxDraft.provider || !auxDraft.model || applying}
                           onClick={() => void applyAuxiliaryDraft(meta.key)}

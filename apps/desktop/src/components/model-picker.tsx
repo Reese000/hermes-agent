@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
+import { searchProviderModels } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
 import { modelSearchText } from '@/lib/model-search-text'
@@ -56,6 +57,9 @@ export function ModelPickerDialog({
   // it and do a plain substring filter that preserves array order — matching
   // the `hermes model` CLI picker, which shows the curated list verbatim.
   const [search, setSearch] = useState('')
+  const [liveResults, setLiveResults] = useState<string[]>([])
+  const [liveLoading, setLiveLoading] = useState(false)
+  const [liveError, setLiveError] = useState<string | null>(null)
 
   const modelOptions = useQuery({
     queryKey: modelOptionsQueryKey(profile, sessionId),
@@ -63,7 +67,56 @@ export function ModelPickerDialog({
     enabled: open
   })
 
-  const providers = modelOptions.data?.providers ?? []
+  const providers = useMemo(() => modelOptions.data?.providers ?? [], [modelOptions.data?.providers])
+
+  // Debounced live search — fetches additional OpenRouter models.
+
+  useEffect(() => {
+    if (!open || !providers.some(p => p.slug === 'openrouter')) {
+      setLiveResults([])
+      setLiveLoading(false)
+      setLiveError(null)
+
+      return
+    }
+
+    if (!search.trim()) {
+      setLiveResults([])
+      setLiveLoading(false)
+      setLiveError(null)
+
+      return
+    }
+
+    let cancelled = false
+    setLiveLoading(true)
+    setLiveError(null)
+
+    const timer = window.setTimeout(() => {
+      searchProviderModels('openrouter', search)
+        .then(result => {
+          if (!cancelled) {
+            const staticModels = new Set(
+              providers.flatMap(p => (p.models ?? []).map(m => m.toLowerCase()))
+            )
+
+            setLiveResults(result.models.filter(m => !staticModels.has(m.toLowerCase())))
+          }
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) {
+            setLiveResults([])
+            setLiveError(err instanceof Error ? err.message : 'Live search failed')
+          }
+        })
+        .finally(() => { if (!cancelled) {setLiveLoading(false)} })
+    }, 300)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [search, open, providers])
 
   const { model: optionsModel, provider: optionsProvider } = currentPickerSelection(
     { model: currentModel, provider: currentProvider },
@@ -114,6 +167,9 @@ export function ModelPickerDialog({
               currentModel={optionsModel || currentModel}
               currentProvider={optionsProvider || currentProvider}
               error={error}
+              liveError={liveError}
+              liveLoading={liveLoading}
+              liveResults={liveResults}
               loading={loading}
               onSelectModel={selectModel}
               providers={providers}
@@ -136,6 +192,9 @@ export function ModelPickerDialog({
 }
 
 function ModelResults({
+  liveError,
+  liveLoading,
+  liveResults,
   loading,
   error,
   providers,
@@ -144,6 +203,9 @@ function ModelResults({
   onSelectModel,
   search
 }: {
+  liveError: string | null
+  liveLoading: boolean
+  liveResults: string[]
   loading: boolean
   error: string | null
   providers: ModelOptionProvider[]
@@ -247,6 +309,62 @@ function ModelResults({
           </CommandGroup>
         )
       })}
+      {(liveResults.length > 0 || liveLoading || liveError || (search.trim() && !liveLoading && !liveError)) && providers.some(p => p.slug === 'openrouter') && (
+        <>
+          {liveError && !liveLoading && (
+            <div className="px-3 py-2">
+              <InlineNotice kind="error" title="Live search failed">
+                {liveError}
+              </InlineNotice>
+            </div>
+          )}
+          {!liveLoading && !liveError && liveResults.length === 0 && search.trim() && (
+            <div className="px-4 py-3 text-sm text-muted-foreground">No live results for "{search}".</div>
+          )}
+          {liveResults.length > 0 && (
+        <CommandGroup heading={
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate">Live Search</span>
+            <span className="font-mono text-xs font-normal normal-case tracking-normal text-muted-foreground">
+              openrouter &middot; {liveResults.length} results
+            </span>
+          </span>
+        }>
+          {liveResults.map(model => {
+            const orProvider = providers.find(p => p.slug === 'openrouter')
+            const price = orProvider?.pricing?.[model]
+
+            return (
+              <CommandItem
+                className="flex items-center gap-2 pl-6 font-mono"
+                key={`live:${model}`}
+                onSelect={() => {
+                  const or = providers.find(p => p.slug === 'openrouter')
+
+                  if (or) {onSelectModel(or, model)}
+                }}
+                value={model}
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  <HighlightMatches query={search} text={model} />
+                </span>
+                <ModelPrice isCurrent={false} price={price} />
+              </CommandItem>
+            )
+          })}
+        </CommandGroup>
+          )}
+        </>
+      )}
+      {liveLoading && liveResults.length === 0 && search.trim() && (
+        <CommandGroup heading={<Skeleton className="h-3 w-32" />}>
+          {Array.from({ length: 3 }, (_, i) => (
+            <div className="rounded-sm py-1.5 pl-6 pr-2" key={i}>
+              <Skeleton className={i === 0 ? 'h-5 w-3/5' : i === 1 ? 'h-5 w-4/5' : 'h-5 w-1/2'} />
+            </div>
+          ))}
+        </CommandGroup>
+      )}
     </>
   )
 }
@@ -297,6 +415,17 @@ function ModelPrice({ price, isCurrent }: { price?: ModelPricing; isCurrent: boo
       <span>
         {price.input || '?'} / {price.output || '?'}
       </span>
+      {price.cache ? (
+        <span
+          className={cn(
+            'text-[0.6rem]',
+            isCurrent ? 'text-primary-foreground/50' : 'text-muted-foreground/70'
+          )}
+          title={`Cache: ${price.cache}`}
+        >
+          {price.cache}
+        </span>
+      ) : null}
       {onSale ? (
         <span
           className={cn(
