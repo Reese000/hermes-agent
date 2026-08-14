@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react'
 import { useQuery } from '@tanstack/react-query'
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, type ReactNode, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
 import { DisclosureCaret } from '@/components/ui/disclosure-caret'
@@ -19,6 +19,7 @@ import { HighlightMatches } from '@/components/ui/highlight-matches'
 import { usePointerQuiet } from '@/components/ui/keyboard-first'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { HermesGateway } from '@/hermes'
+import { searchProviderModels } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
 import { displayModelName, modelDisplayParts } from '@/lib/model-status-label'
@@ -30,9 +31,13 @@ import {
   collapseModelFamilies,
   DEFAULT_VISIBLE_PER_PROVIDER,
   effectiveVisibleKeys,
+  emptyProviderSentinelKey,
   type ModelFamily,
+  isProviderSentinel,
   modelVisibilityKey,
-  setModelVisibilityOpen
+  setModelVisibilityOpen,
+  setVisibleModels,
+  toggleModelVisibility
 } from '@/store/model-visibility'
 import { $collapsedProviders, toggleCollapsedProvider } from '@/store/provider-collapse'
 import { $defaultReasoningEffort } from '@/store/session'
@@ -153,6 +158,78 @@ export function ModelCatalogMenu({
     : null
 
   const providers = modelOptions.data?.providers
+
+  // Live OpenRouter search: the curated catalog only carries hand-picked
+  // models, so a query for anything outside it shows "no models". Debounced
+  // search over the live OpenRouter catalog fills that gap — results are
+  // plain model-id strings, deduped against the curated static list.
+  const [liveResults, setLiveResults] = useState<string[]>([])
+  const [liveLoading, setLiveLoading] = useState(false)
+  const [liveError, setLiveError] = useState<string | null>(null)
+
+  // The search input lives inside a Radix DropdownMenu. Radix's focus group
+  // moves DOM focus to the first interactive item when items mount/unmount —
+  // live results arriving (or the loading skeleton replacing them) yanks the
+  // caret out of the input mid-typing. Hold focus on the input: run after
+  // Radix's own layout effects so we win the focus fight, and only when the
+  // input is actually mounted and not already focused.
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  useLayoutEffect(() => {
+    const input = searchInputRef.current
+
+    if (input && document.activeElement !== input) {
+      input.focus()
+    }
+  }, [liveResults, liveLoading, liveError])
+
+  const hasOpenRouter = useMemo(
+    () => providers?.some(p => p.slug.toLowerCase() === 'openrouter') ?? false,
+    [providers]
+  )
+
+  useEffect(() => {
+    if (!hasOpenRouter || !search.trim()) {
+      setLiveResults([])
+      setLiveLoading(false)
+      setLiveError(null)
+
+      return
+    }
+
+    let cancelled = false
+    setLiveLoading(true)
+    setLiveError(null)
+
+    const timer = window.setTimeout(() => {
+      searchProviderModels('openrouter', search)
+        .then(result => {
+          if (!cancelled) {
+            const staticModels = new Set(
+              providers?.flatMap(p => (p.models ?? []).map(m => m.toLowerCase())) ?? []
+            )
+
+            setLiveResults(result.models.filter(m => !staticModels.has(m.toLowerCase())))
+          }
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) {
+            setLiveResults([])
+            setLiveError(err instanceof Error ? err.message : 'Live search failed')
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLiveLoading(false)
+          }
+        })
+    }, 300)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [search, hasOpenRouter, providers])
 
   // The catalog carries MoA presets as a virtual `moa` provider row. Keep it
   // out of the main groups so presets never show up twice.
@@ -337,6 +414,7 @@ export function ModelCatalogMenu({
           setKbOverride(null)
         }}
         placeholder={copy.search}
+        ref={searchInputRef}
         value={search}
       />
 
@@ -483,6 +561,120 @@ export function ModelCatalogMenu({
         </div>
       )}
 
+      {search.trim() && hasOpenRouter ? (
+        <div className={cn('max-h-[max(150px,30dvh)] overflow-y-auto py-0.5', quietRows)}>
+          {liveError ? (
+            <DropdownMenuItem className={dropdownMenuRow} disabled>
+              <span className="text-destructive">Live search failed: {liveError}</span>
+            </DropdownMenuItem>
+          ) : liveLoading ? (
+            <DropdownMenuGroup className="py-1">
+              {Array.from({ length: 3 }, (_, index) => (
+                <DropdownMenuItem className={dropdownMenuRow} disabled key={`live-skeleton-${index}`} onSelect={e => e.preventDefault()}>
+                  <Skeleton className="h-4 w-full" />
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          ) : liveResults.length > 0 ? (
+            <DropdownMenuGroup className="py-0.5">
+              <DropdownMenuLabel className={dropdownMenuSectionLabel}>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate">Live Search</span>
+                  <span className="text-(--ui-text-tertiary)">openrouter · {liveResults.length} results</span>
+                </span>
+              </DropdownMenuLabel>
+              {liveResults.map(model => {
+                const orProvider = pickerProviders.find(p => p.slug === 'openrouter')
+                const preset = controller.presetFor('openrouter', model)
+                const effEffort = preset.effort ?? ''
+                const effFast = preset.fast ?? false
+                const fastControl: FastControl = resolveFastControl(
+                  model,
+                  orProvider?.models ?? [],
+                  orProvider?.capabilities?.[model]?.fast ?? false,
+                  effFast
+                )
+                const meta = [
+                  fastControl.kind !== 'none' && fastControl.on ? copy.fast : null,
+                  reasoningEffortLabel(effEffort || defaultEffort)
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+
+                return (
+                  <DropdownMenuSub key={`live:${model}`}>
+                    <DropdownMenuSubTrigger
+                      hideChevron
+                      onClick={() => {
+                        // Persist the live search model to the visible set so it
+                        // appears in the default (unfiltered) catalog next time.
+                        setVisibleModels(
+                          toggleModelVisibility(visibleModels, pickerProviders, 'openrouter', model)
+                        )
+                        void controller.select(model, 'openrouter')
+                        // Save and apply the preset so effort/fast carry to other
+                        // chats — mirrors what selectFamily does for curated models.
+                        controller.applyPreset(
+                          {
+                            effort: (orProvider?.capabilities?.[model]?.reasoning ?? true)
+                              ? (preset.effort || defaultEffort)
+                              : undefined,
+                            fast: fastControl.kind !== 'none' ? (preset.fast ?? false) : undefined
+                          },
+                          { model, provider: 'openrouter' }
+                        )
+                        closeMenu()
+                      }}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          setVisibleModels(
+                            toggleModelVisibility(visibleModels, pickerProviders, 'openrouter', model)
+                          )
+                          void controller.select(model, 'openrouter')
+                          controller.applyPreset(
+                            {
+                              effort: (orProvider?.capabilities?.[model]?.reasoning ?? true)
+                                ? (preset.effort || defaultEffort)
+                                : undefined,
+                              fast: fastControl.kind !== 'none' ? (preset.fast ?? false) : undefined
+                            },
+                            { model, provider: 'openrouter' }
+                          )
+                          closeMenu()
+                        }
+                      }}
+                      className={cn(dropdownMenuRow, 'font-mono')}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        <HighlightMatches query={search} text={model} />
+                        {meta ? <span className="text-(--ui-text-tertiary)"> {meta}</span> : null}
+                      </span>
+                    </DropdownMenuSubTrigger>
+                    <ModelEditSubmenu
+                      defaultEffort={defaultEffort}
+                      effort={effEffort}
+                      fastControl={fastControl}
+                      isActive={false}
+                      model={model}
+                      onSelectModel={nextModel => controller.select(nextModel, 'openrouter')}
+                      onSetOptions={patch =>
+                        controller.setOptions(patch, {
+                          isActive: false,
+                          model,
+                          provider: 'openrouter'
+                        })
+                      }
+                      provider="openrouter"
+                      reasoning={orProvider?.capabilities?.[model]?.reasoning ?? true}
+                    />
+                  </DropdownMenuSub>
+                )
+              })}
+            </DropdownMenuGroup>
+          ) : null}
+        </div>
+      ) : null}
+
       {shownMoaPresets.length > 0 ? (
         <div className={cn(quietRows)}>
           <DropdownMenuSeparator className="mx-0" />
@@ -545,6 +737,21 @@ function groupModels(
 
   for (const provider of providers) {
     const allFamilies = collapseModelFamilies(provider.models ?? [])
+
+    // Include models from the visible set that aren't in the provider's
+    // curated list — e.g. live-search models the user explicitly added.
+    // These sit at the end so the curated order is preserved.
+    if (visible) {
+      const providerPrefix = `${provider.slug}::`
+      const curatedIds = new Set(allFamilies.flatMap(f => [f.id, f.fastId].filter(Boolean)))
+      const extraFromVisible = [...visible]
+        .filter(key => key.startsWith(providerPrefix) && !isProviderSentinel(key))
+        .map(key => key.slice(providerPrefix.length))
+        .filter(model => !curatedIds.has(model))
+      for (const model of extraFromVisible) {
+        allFamilies.push({ id: model, fastId: null })
+      }
+    }
 
     if (allFamilies.length === 0) {
       continue

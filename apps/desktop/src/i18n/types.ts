@@ -1900,6 +1900,11 @@ export interface Translations {
     snippets: Record<string, { label: string; description: string; text: string }>
     dropFiles: string
     dropSession: string
+    enhance: string
+    enhancing: string
+    enhanceFailed: string
+    enhanceRateLimited: string
+    enhanceTooLong: string
     mcpSuggestions: {
       label: (server: string) => string
       tip: (keyword: string) => string
@@ -1937,6 +1942,21 @@ export interface Translations {
       done: string
       doneTip: string
     }
+  }
+
+  usage: {
+    costLabel: string
+    inputTokens: string
+    outputTokens: string
+    cacheReadTokens: string
+    cacheHitRate: string
+    reasoningTokens: string
+    estimatedCost: string
+    actualCost: string
+    costPerHour: string
+    tokensPerSecond: string
+    elapsed: string
+    calls: string
   }
 
   statusStack: {

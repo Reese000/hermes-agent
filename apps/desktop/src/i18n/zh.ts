@@ -1163,7 +1163,9 @@ export const zh: Translations = {
         approval: { label: '审批', hint: '智能自动批准' },
         mcp: { label: 'MCP', hint: 'MCP 工具路由' },
         title_generation: { label: '标题生成', hint: '会话标题' },
-        curator: { label: '维护器', hint: '技能使用审查' }
+        curator: { label: '维护器', hint: '技能使用审查' },
+        subagent: { label: '子代理 (delegate_task)', hint: '子代理使用的模型' },
+        prompt_enhance: { label: '提示增强', hint: '重写用户提示' }
       }
     },
     providers: {
@@ -2362,6 +2364,11 @@ export const zh: Translations = {
     stopDictation: '停止听写',
     transcribingDictation: '正在转写听写',
     voiceDictation: '语音听写',
+    enhance: '增强提示',
+    enhancing: '增强中...',
+    enhanceFailed: '增强失败',
+    enhanceRateLimited: '操作过快 — 请等待几秒后重试',
+    enhanceTooLong: '提示词过长，无法增强',
     speakReplies: '朗读回复',
     stopSpeakingReplies: '停止朗读回复',
     wakeWordListening: phrase => `唤醒词:"${phrase}" — 正在监听`,
@@ -2492,6 +2499,21 @@ export const zh: Translations = {
         text: '请解释这是如何工作的，并指给我关键文件。'
       }
     }
+  },
+
+  usage: {
+    costLabel: '会话成本',
+    inputTokens: '输入 Token',
+    outputTokens: '输出 Token',
+    cacheReadTokens: '缓存读取',
+    cacheHitRate: '缓存命中率',
+    reasoningTokens: '推理 Token',
+    estimatedCost: '预估成本',
+    actualCost: '实际成本',
+    costPerHour: '每小时成本',
+    tokensPerSecond: '每秒 Token 数',
+    elapsed: '耗时',
+    calls: 'API 调用'
   },
 
   statusStack: {
