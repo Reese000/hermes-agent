@@ -6407,6 +6407,8 @@ _AUX_TASK_SLOTS: Tuple[str, ...] = (
     "kanban_decomposer",
     "profile_describer",
     "curator",
+    "prompt_enhance",
+    "subagent",
 )
 
 
