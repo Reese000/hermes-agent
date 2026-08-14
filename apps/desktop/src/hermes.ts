@@ -22,6 +22,7 @@ import type {
   CustomEndpointValidationResponse,
   DebugShareResponse,
   ElevenLabsVoicesResponse,
+  EnhancePromptResponse,
   EnvVarInfo,
   HermesConfig,
   HermesConfigRecord,
@@ -55,6 +56,7 @@ import type {
   SessionMessage,
   SessionMessagesResponse,
   SessionSearchResponse,
+  SessionUsageResponse,
   SkillHubPreview,
   SkillHubScanResult,
   SkillHubSearchResponse,
@@ -1594,6 +1596,143 @@ export function getUsageAnalytics(days = 30): Promise<AnalyticsResponse> {
   })
 }
 
+export function getSessionUsage(sessionId: string): Promise<SessionUsageResponse> {
+  return window.hermesDesktop.api<SessionUsageResponse>({
+    ...profileScoped(),
+    path: `/api/sessions/${encodeURIComponent(sessionId)}/usage`
+  })
+}
+
+export function enhancePrompt(
+  text: string,
+  sessionId?: string | null,
+  signal?: AbortSignal
+): Promise<EnhancePromptResponse> {
+  return window.hermesDesktop.api<EnhancePromptResponse>({
+    ...profileScoped(),
+    path: '/api/model/enhance-prompt',
+    method: 'POST',
+    body: { prompt: text, session_id: sessionId || undefined },
+    signal,
+    // No timeout — enhance can take a while for long prompts or slow models.
+    // The backend has its 120s LLM timeout; we just need the IPC layer to
+    // not cut off before that. Use a large value instead of 0 because
+    // resolveTimeoutMs treats 0 as "use default" (15s).
+    timeoutMs: 300_000
+  })
+}
+
+/** Streaming version of enhancePrompt — yields text chunks as the LLM generates.
+ *  Uses the SSE streaming endpoint via Electron IPC. The caller consumes
+ *  chunks via `for await (const chunk of enhancePromptStream(...))`.
+ *  On error, throws with the error message. On abort, stops iteration. */
+export async function* enhancePromptStream(
+  text: string,
+  sessionId?: string | null,
+  signal?: AbortSignal
+): AsyncGenerator<string, void, unknown> {
+  if (!window.hermesDesktop?.apiStream) {
+    console.log('[enhance] apiStream not available, falling back to non-streaming')
+    // Fallback to non-streaming if the preload bridge doesn't have apiStream
+    const res = await enhancePrompt(text, sessionId, signal)
+    if (res.ok && res.enhanced) {
+      yield res.enhanced
+    }
+    return
+  }
+
+  console.log('[enhance] using streaming API')
+  const chunks: string[] = []
+  let resolve: (() => void) | null = null
+  let reject: ((err: Error) => void) | null = null
+  let done = false
+  let donePayload: { ok: boolean; error?: string } | null = null
+
+  const { dispose } = window.hermesDesktop.apiStream(
+    {
+      ...profileScoped(),
+      path: '/api/model/enhance-prompt-stream',
+      method: 'POST',
+      body: { prompt: text, session_id: sessionId || undefined },
+      timeoutMs: 300_000
+    },
+    {
+      onChunk: (payload: { data: string }) => {
+        console.log('[enhance] chunk:', payload.data?.substring(0, 80))
+        if (payload.data === '[DONE]') {
+          done = true
+          donePayload = { ok: true }
+          resolve?.()
+          return
+        }
+        try {
+          const parsed = JSON.parse(payload.data)
+          if (parsed.error) {
+            done = true
+            donePayload = { ok: false, error: parsed.error }
+            resolve?.()
+            return
+          }
+          if (parsed.text) {
+            chunks.push(parsed.text)
+            resolve?.()
+          }
+        } catch {
+          // Non-JSON data line — skip
+        }
+      },
+      onDone: (payload: { ok: boolean; error?: string }) => {
+        done = true
+        donePayload = payload
+        resolve?.()
+      }
+    }
+  )
+
+  // Abort handler
+  const abortHandler = () => {
+    done = true
+    donePayload = { ok: false, error: 'aborted' }
+    resolve?.()
+  }
+  signal?.addEventListener('abort', abortHandler)
+
+  let chunkIndex = 0
+
+  try {
+    while (!done || chunkIndex < chunks.length) {
+      if (chunkIndex < chunks.length) {
+        yield chunks[chunkIndex++]
+        // Always yield to the event loop after yielding a chunk, even if more
+        // chunks are already queued. Without this, rapid IPC chunks get consumed
+        // synchronously in one microtask batch — React never gets a chance to
+        // flush state updates between them, so the user sees only the final text.
+        await new Promise<void>(r => setTimeout(r, 0))
+      } else {
+        // Wait for next chunk or completion
+        await new Promise<void>((res, rej) => {
+          resolve = res
+          reject = rej
+        })
+        resolve = null
+        reject = null
+      }
+    }
+
+    // Yield any remaining chunks
+    while (chunkIndex < chunks.length) {
+      yield chunks[chunkIndex++]
+    }
+
+    if (donePayload && !donePayload.ok) {
+      throw new Error(donePayload.error || 'Streaming enhance failed')
+    }
+  } finally {
+    signal?.removeEventListener('abort', abortHandler)
+    dispose()
+  }
+}
+
 export function getGlobalModelOptions(opts?: {
   refresh?: boolean
   includeUnconfigured?: boolean
@@ -1650,6 +1789,13 @@ export function setGlobalModel(
       provider,
       model
     }
+  })
+}
+
+export function searchProviderModels(provider: string, query: string): Promise<{ models: string[] }> {
+  return window.hermesDesktop.api<{ models: string[] }>({
+    ...profileScoped(),
+    path: `/api/model/search?${new URLSearchParams({ q: query, provider }).toString()}`
   })
 }
 

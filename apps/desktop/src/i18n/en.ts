@@ -865,7 +865,9 @@ export const en: Translations = {
         approval: { label: 'Approval', hint: 'Smart auto-approve' },
         mcp: { label: 'MCP', hint: 'MCP tool routing' },
         title_generation: { label: 'Title gen', hint: 'Session titles' },
-        curator: { label: 'Curator', hint: 'Skill-usage review' }
+        curator: { label: 'Curator', hint: 'Skill-usage review' },
+        subagent: { label: "Subagent (delegate_task)", hint: "Model for child agents" },
+        prompt_enhance: { label: 'Prompt Enhance', hint: 'Rewrite user prompts' }
       }
     },
     providers: {
@@ -2058,6 +2060,11 @@ export const en: Translations = {
     stopDictation: 'Stop dictation',
     transcribingDictation: 'Transcribing dictation',
     voiceDictation: 'Voice dictation',
+    enhance: 'Enhance prompt',
+    enhancing: 'Enhancing...',
+    enhanceFailed: 'Enhance failed',
+    enhanceRateLimited: 'Too fast — wait a few seconds and try again',
+    enhanceTooLong: 'Prompt too long for enhancement',
     speakReplies: 'Read replies aloud',
     stopSpeakingReplies: 'Stop reading replies aloud',
     wakeWordListening: phrase => `Wake word: "${phrase}" — listening`,
@@ -3075,5 +3082,19 @@ export const en: Translations = {
       description: 'Displays the mobile sidebar.',
       toggle: open => `${open ? 'Show' : 'Hide'} sidebar`
     }
+  },
+  usage: {
+    costLabel: 'Session cost',
+    inputTokens: 'Input tokens',
+    outputTokens: 'Output tokens',
+    cacheReadTokens: 'Cache read',
+    cacheHitRate: 'Cache hit rate',
+    reasoningTokens: 'Reasoning tokens',
+    estimatedCost: 'Estimated cost',
+    actualCost: 'Actual cost',
+    costPerHour: 'Cost/hour',
+    tokensPerSecond: 'Tokens/sec',
+    elapsed: 'Elapsed',
+    calls: 'API calls'
   }
 }

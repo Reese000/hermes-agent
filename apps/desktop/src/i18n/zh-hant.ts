@@ -862,7 +862,9 @@ export const zhHant = defineLocale({
         approval: { label: '核准', hint: '智慧自動核准' },
         mcp: { label: 'MCP', hint: 'MCP 工具路由' },
         title_generation: { label: '標題生成', hint: '工作階段標題' },
-        curator: { label: '策展器', hint: '技能使用審查' }
+        curator: { label: '策展器', hint: '技能使用審查' },
+        subagent: { label: '子代理 (delegate_task)', hint: '子代理使用的模型' },
+        prompt_enhance: { label: '提示增強', hint: '重寫使用者提示' }
       }
     },
     providers: {
@@ -1812,6 +1814,11 @@ export const zhHant = defineLocale({
     stopDictation: '停止聽寫',
     transcribingDictation: '正在轉寫聽寫',
     voiceDictation: '語音聽寫',
+    enhance: '增強提示',
+    enhancing: '增強中...',
+    enhanceFailed: '增強失敗',
+    enhanceRateLimited: '操作過快 — 請等待幾秒後重試',
+    enhanceTooLong: '提示詞過長，無法增強',
     speakReplies: '朗讀回覆',
     stopSpeakingReplies: '停止朗讀回覆',
     wakeWordListening: phrase => `喚醒詞:「${phrase}」— 正在聆聽`,
@@ -1905,6 +1912,21 @@ export const zhHant = defineLocale({
         text: '請解釋這是如何運作的，並告訴我關鍵檔案在哪裡。'
       }
     }
+  },
+
+  usage: {
+    costLabel: '工作階段費用',
+    inputTokens: '輸入詞元',
+    outputTokens: '輸出詞元',
+    cacheReadTokens: '快取讀取',
+    cacheHitRate: '快取命中率',
+    reasoningTokens: '推理詞元',
+    estimatedCost: '預估費用',
+    actualCost: '實際費用',
+    costPerHour: '每小時成本',
+    tokensPerSecond: '每秒詞元數',
+    elapsed: '已用時間',
+    calls: 'API 呼叫'
   },
 
   statusStack: {

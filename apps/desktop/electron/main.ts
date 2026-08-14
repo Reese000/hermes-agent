@@ -10909,6 +10909,78 @@ ipcMain.handle('hermes:api', async (_event, request) => {
   })
 })
 
+// ── Streaming API handler ───────────────────────────────────────────────
+// Unlike hermes:api (which buffers the full response), this handler streams
+// SSE chunks back to the renderer via event.sender.send(). The renderer
+// listens on the corresponding channel for incremental data.
+// Channel protocol: hermes:api-stream:chunk  → {data: string} (SSE line)
+//                   hermes:api-stream:done   → {ok: boolean, error?: string}
+ipcMain.on('hermes:api-stream', async (event, request) => {
+  try {
+    const profile = request?.profile
+    const routeProfile = resolveRouteProfile(null, profile)
+    const connection = await ensureBackend(routeProfile)
+    const timeoutMs = resolveTimeoutMs(request?.timeoutMs, 300_000)
+    const requestPath = pathWithGlobalRemoteProfile(request.path, profile, profileRouteOptions(profile))
+    const url = `${connection.baseUrl}${requestPath}`
+
+    const body = request?.body === undefined ? undefined : Buffer.from(JSON.stringify(request.body))
+    const parsed = new URL(url)
+    const client = parsed.protocol === 'https:' ? https : http
+
+    const req = client.request(parsed, {
+      method: request?.method || 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hermes-Session-Token': connection.token,
+        ...(body ? { 'Content-Length': String(body.length) } : {})
+      }
+    }, res => {
+      // Stream the response body line by line
+      let buffer = ''
+      res.on('data', chunk => {
+        buffer += chunk.toString('utf8')
+        // Process complete SSE lines
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || '' // Keep incomplete line in buffer
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            event.sender.send('hermes:api-stream:chunk', { data: line.slice(6) })
+          }
+        }
+      })
+      res.on('end', () => {
+        // Flush remaining buffer
+        if (buffer.startsWith('data: ')) {
+          event.sender.send('hermes:api-stream:chunk', { data: buffer.slice(6) })
+        }
+        event.sender.send('hermes:api-stream:done', { ok: true })
+      })
+      res.on('error', err => {
+        event.sender.send('hermes:api-stream:done', { ok: false, error: err.message })
+      })
+    })
+
+    req.on('error', err => {
+      event.sender.send('hermes:api-stream:done', { ok: false, error: err.message })
+    })
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Streaming enhance timed out after ${timeoutMs}ms`))
+    })
+
+    if (body) {
+      req.write(body)
+    }
+    req.end()
+  } catch (err) {
+    event.sender.send('hermes:api-stream:done', {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err)
+    })
+  }
+})
+
 // One deduper per cross-window cue — the choke point every window shares. Main
 // handles IPC serially, so the first window to claim a key wins with no race.
 const isDuplicateNotification = createEventDeduper()

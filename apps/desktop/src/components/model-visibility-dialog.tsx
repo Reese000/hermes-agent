@@ -19,12 +19,14 @@ import {
   $visibleModels,
   collapseModelFamilies,
   effectiveVisibleKeys,
+  isProviderSentinel,
   modelVisibilityKey,
   setProviderVisibility,
   setVisibleModels,
   toggleModelVisibility
 } from '@/store/model-visibility'
 import { $collapsedProviders, toggleCollapsedProvider } from '@/store/provider-collapse'
+import { $usageIndicatorEnabled } from '@/store/usage-indicator'
 import type { ModelOptionProvider, ModelOptionsResponse } from '@/types/hermes'
 
 interface ModelVisibilityDialogProps {
@@ -102,13 +104,27 @@ export function ModelVisibilityDialog({
             </div>
           ) : (
             providers.map(provider => {
-              const models = collapseModelFamilies(provider.models ?? []).filter(family => matches(provider, family.id))
+              const allFamilies = collapseModelFamilies(provider.models ?? [])
+
+              // Include models from the visible set that aren't in the curated
+              // list (e.g., live-search models the user explicitly added).
+              if (stored) {
+                const providerPrefix = `${provider.slug}::`
+                const curatedIds = new Set(allFamilies.flatMap(f => [f.id, f.fastId].filter(Boolean)))
+                const extraFromVisible = [...stored]
+                  .filter(key => key.startsWith(providerPrefix) && !isProviderSentinel(key))
+                  .map(key => key.slice(providerPrefix.length))
+                  .filter(model => !curatedIds.has(model))
+                for (const model of extraFromVisible) {
+                  allFamilies.push({ id: model, fastId: null })
+                }
+              }
+
+              const models = allFamilies.filter(family => matches(provider, family.id))
 
               if (models.length === 0) {
                 return null
               }
-
-              const allFamilies = collapseModelFamilies(provider.models ?? [])
 
               const onCount = allFamilies.filter(family =>
                 visible.has(modelVisibilityKey(provider.slug, family.id))
@@ -168,6 +184,16 @@ export function ModelVisibilityDialog({
           )}
         </div>
 
+        <div className="border-t px-3 py-2">
+          <label className="flex cursor-pointer items-center gap-2 text-xs">
+            <span className="min-w-0 flex-1 text-(--ui-text-tertiary)">Usage indicator</span>
+            <Switch
+              checked={useStore($usageIndicatorEnabled)}
+              onCheckedChange={checked => $usageIndicatorEnabled.set(checked)}
+              size="xs"
+            />
+          </label>
+        </div>
         <div className="px-3 py-2">
           <Button
             className="-ml-2 text-(--ui-text-tertiary)"

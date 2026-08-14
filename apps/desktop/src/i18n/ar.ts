@@ -806,6 +806,14 @@ export const ar = defineLocale({
         curator: {
           label: 'المنسّق',
           hint: 'مراجعة استخدام المهارات'
+        },
+        subagent: {
+          label: 'وكيل فرعي (delegate_task)',
+          hint: 'النموذج المستخدم للوكلاء الفرعيين'
+        },
+        prompt_enhance: {
+          label: 'تحسين الموجه',
+          hint: 'إعادة كتابة موجّهات المستخدم'
         }
       }
     },
@@ -1699,6 +1707,11 @@ export const ar = defineLocale({
     stopDictation: 'إيقاف الإملاء',
     transcribingDictation: 'جار تفريغ الإملاء',
     voiceDictation: 'إملاء صوتي',
+    enhance: 'تحسين الموجه',
+    enhancing: 'جار التحسين...',
+    enhanceFailed: 'فشل التحسين',
+    enhanceRateLimited: 'سرعة كبيرة — انتظر بضع ثوانٍ وحاول مرة أخرى',
+    enhanceTooLong: 'النص طويل جداً للتحسين',
     lookupLoading: 'جار البحث...',
     lookupNoMatches: 'لا توجد نتائج',
     lookupTry: 'جرب',
@@ -1784,6 +1797,20 @@ export const ar = defineLocale({
         text: 'يرجى شرح كيفية عمل هذا وإرشادي إلى الملفات الرئيسية.'
       }
     }
+  },
+  usage: {
+    costLabel: 'تكلفة الجلسة',
+    inputTokens: 'رموز الإدخال',
+    outputTokens: 'رموز الإخراج',
+    cacheReadTokens: 'قراءة التخزين المؤقت',
+    cacheHitRate: 'معدل إصابة التخزين المؤقت',
+    reasoningTokens: 'رموز الاستدلال',
+    estimatedCost: 'التكلفة المقدرة',
+    actualCost: 'التكلفة الفعلية',
+    costPerHour: 'التكلفة في الساعة',
+    tokensPerSecond: 'الرموز في الثانية',
+    elapsed: 'الوقت المنقضي',
+    calls: 'استدعاءات API'
   },
   statusStack: {
     agents: 'الوكلاء',

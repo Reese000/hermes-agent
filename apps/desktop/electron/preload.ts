@@ -141,6 +141,24 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     set: name => ipcRenderer.invoke('hermes:profile:set', name)
   },
   api: request => ipcRenderer.invoke('hermes:api', request),
+  // Streaming API — sends chunks via event listeners instead of buffering.
+  // Returns { onChunk, onDone, dispose } for the caller to consume events.
+  apiStream: (request, callbacks) => {
+    const { onChunk, onDone } = callbacks
+    const chunkHandler = (_event, payload) => onChunk(payload)
+    const doneHandler = (_event, payload) => {
+      cleanup()
+      onDone(payload)
+    }
+    const cleanup = () => {
+      ipcRenderer.removeListener('hermes:api-stream:chunk', chunkHandler)
+      ipcRenderer.removeListener('hermes:api-stream:done', doneHandler)
+    }
+    ipcRenderer.on('hermes:api-stream:chunk', chunkHandler)
+    ipcRenderer.on('hermes:api-stream:done', doneHandler)
+    ipcRenderer.send('hermes:api-stream', request)
+    return { dispose: cleanup }
+  },
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),
   requestMicrophoneAccess: () => ipcRenderer.invoke('hermes:requestMicrophoneAccess'),
   readWindowBelow: () => ipcRenderer.invoke('hermes:window:readBelow'),

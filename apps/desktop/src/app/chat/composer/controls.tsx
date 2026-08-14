@@ -1,7 +1,32 @@
 import { useStore } from '@nanostores/react'
+import { useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Codicon } from '@/components/ui/codicon'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger
+} from '@/components/ui/context-menu'
+// ── Enhance model catalog: separate DropdownMenu ──────────────────────────
+// ModelCatalogMenu renders DropdownMenu* primitives (DropdownMenuItem,
+// DropdownMenuSub, etc.) which REQUIRE a DropdownMenu context. It cannot be
+// nested inside a ContextMenuSubContent — Radix throws
+// "MenuItem must be used within Menu" because ContextMenu and DropdownMenu
+// have separate, incompatible provider trees. The solution: a standalone
+// DropdownMenu with its own hidden trigger (<span className="sr-only" />),
+// controlled via `modelMenuOpen` state. The context menu's "Model:" row
+// opens it via onSelect + onPointerEnter. The sr-only trigger gives Radix
+// a DOM element to anchor the dropdown to (without it, the dropdown defaults
+// to the screen corner). Positioning is side="top" align="start" so it
+// appears above the composer controls, near the enhance button.
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
@@ -12,14 +37,26 @@ import {
   iconSize,
   Layers3,
   Loader2,
+  Sparkles,
   Square,
   SteeringWheel,
   Volume2,
   VolumeX
 } from '@/lib/icons'
+import { displayModelName } from '@/lib/model-status-label'
+import { reasoningEffortLabel, type ReasoningEffort } from '@/lib/reasoning-effort'
 import { cn } from '@/lib/utils'
+import {
+  $enhanceEnabled,
+  $enhanceModel,
+  $enhanceProfile,
+  $enhanceProvider,
+  $enhanceReasoning,
+  ENHANCE_PROFILES
+} from '@/store/enhance-settings'
 import { $wakeWord, toggleWakeWord } from '@/store/wake-word'
 
+import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from '@/app/shell/model-catalog-menu'
 import type { ConversationStatus } from './hooks/use-voice-conversation'
 import { ModelPill } from './model-pill'
 import type { ChatBarState, VoiceStatus } from './types'
@@ -58,7 +95,10 @@ export function ComposerControls({
   compactModelPill = false,
   conversation,
   disabled,
+  enhancing = false,
   hasComposerPayload,
+  onCancelEnhance,
+  onEnhance,
   state,
   voiceStatus,
   onDictate,
@@ -72,7 +112,10 @@ export function ComposerControls({
   compactModelPill?: boolean
   conversation: ConversationProps
   disabled: boolean
+  enhancing?: boolean
   hasComposerPayload: boolean
+  onCancelEnhance?: () => void
+  onEnhance?: () => void
   state: ChatBarState
   voiceStatus: VoiceStatus
   onDictate: () => void
@@ -81,6 +124,41 @@ export function ComposerControls({
 }) {
   const { t } = useI18n()
   const c = t.composer
+
+  const enhanceEnabled = useStore($enhanceEnabled)
+  const enhanceModel = useStore($enhanceModel)
+  const enhanceProvider = useStore($enhanceProvider)
+  const enhanceReasoning = useStore($enhanceReasoning)
+  const enhanceProfile = useStore($enhanceProfile)
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+
+  // ── Enhance model controller ───────────────────────────────────────────
+  // Adapts ModelMenuController (designed for session-state model selection)
+  // to the enhance settings atoms. ModelCatalogMenu reads `current` for the
+  // active checkmark, calls `select()` on row click, and `setOptions()` for
+  // per-row reasoning/fast edits via hover submenus. `applyPreset` and
+  // `presetFor` are no-ops because enhance doesn't persist per-model presets
+  // — it stores a single global reasoning level in $enhanceReasoning.
+  const enhanceController: ModelMenuController = useMemo(() => ({
+    applyPreset: () => {},
+    current: {
+      effort: enhanceReasoning,
+      fast: false,
+      model: enhanceModel,
+      provider: enhanceProvider,
+    },
+    presetFor: () => ({ effort: enhanceReasoning }),
+    select: (model: string, provider: string) => {
+      $enhanceModel.set(model)
+      $enhanceProvider.set(provider)
+      setModelMenuOpen(false)
+    },
+    setOptions: (patch) => {
+      if (patch.effort !== undefined) {
+        $enhanceReasoning.set(patch.effort as ReasoningEffort)
+      }
+    },
+  }), [enhanceModel, enhanceProvider, enhanceReasoning])
 
   if (conversation.active) {
     return <ConversationPill {...conversation} disabled={disabled} />
@@ -91,6 +169,111 @@ export function ComposerControls({
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-(--composer-control-gap)">
+      {onEnhance && enhanceEnabled ? (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="contents">
+              {/* ── Enhance tooltip ─────────────────────────────────────
+                  Two-line tooltip: model+reasoning on line 1, hint on line 2.
+                  Uses ReactNode (not plain string) for multi-line layout.
+                  `!block` overrides the TooltipContent inner span's
+                  `[&>*]:!inline-flex` rule which otherwise collapses both
+                  spans onto one line. The hint line uses 9px italic faded
+                  text to visually de-emphasize it. ──────────────────────── */}
+              <Tip label={enhancing ? c.enhancing : (
+                <>
+                  <span className="!block">{c.enhance} — {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
+                  <span className="!block text-[9px] italic opacity-60">right-click to configure</span>
+                </>
+              )}>
+                <Button
+                  aria-label={enhancing ? c.enhancing : c.enhance}
+                  className={cn(GHOST_ICON_BTN, 'p-0')}
+                  disabled={disabled}
+                  onClick={enhancing ? onCancelEnhance : onEnhance}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  {enhancing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className={iconSize.sm} />}
+                </Button>
+              </Tip>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-64">
+            <ContextMenuItem onSelect={() => $enhanceEnabled.set(false)}>
+              <Codicon name="eye-closed" size="0.875rem" className="mr-2" />
+              Hide enhance button
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Codicon name="list-filter" size="0.875rem" className="mr-2" />
+                Profile: {ENHANCE_PROFILES[enhanceProfile]?.label || enhanceProfile}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-48">
+                {Object.entries(ENHANCE_PROFILES).map(([key, profile]) => (
+                  <ContextMenuItem key={key} onSelect={() => $enhanceProfile.set(key)}>
+                    <Checkbox checked={key === enhanceProfile} className="mr-2 size-3" />
+                    <span className="min-w-0 flex-1">
+                      {profile.label}
+                      <span className="ml-1 text-[0.625rem] text-muted-foreground">{profile.description}</span>
+                    </span>
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+            {/* ── Model selector row ────────────────────────────────────
+                Opens the DropdownMenu below on BOTH click and hover.
+                `onPointerEnter` gives hover-to-open UX like the main
+                model pill dropdown. `onSelect` handles click as fallback.
+                The DropdownMenu's sr-only trigger anchors the dropdown
+                near this row (side="top" align="start"). ──────────────── */}
+            <ContextMenuItem
+              onSelect={() => setModelMenuOpen(true)}
+              onPointerEnter={() => setModelMenuOpen(true)}
+            >
+              <Codicon name="settings-gear" size="0.875rem" className="mr-2" />
+              <span className="min-w-0 flex-1 truncate">Model: {displayModelName(enhanceModel)}</span>
+              <Codicon name="chevron-right" size="0.75rem" className="ml-auto opacity-50" />
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : null}
+      {/* ── Enhance model catalog DropdownMenu ─────────────────────────
+          MUST be a separate DropdownMenu (not inside ContextMenu) because
+          ModelCatalogMenu renders DropdownMenu* primitives that require a
+          DropdownMenu provider context. Radix ContextMenu and DropdownMenu
+          have incompatible provider trees — nesting causes
+          "MenuItem must be used within Menu" crashes.
+
+          The trigger is a visually hidden <span className="sr-only" />.
+          Radix DropdownMenu needs a DOM element to calculate position;
+          without one it defaults to the screen corner. The sr-only span
+          sits in the normal flow near the enhance button, giving Radix
+          a valid anchor. Content uses side="top" align="start" to appear
+          above the composer, left-aligned with the enhance button.
+
+          Controlled via `modelMenuOpen` state, toggled by the context
+          menu's "Model:" row (onSelect + onPointerEnter).
+
+          ModelMenuCloseContext lets ModelCatalogMenu's internal close
+          calls (on model select, keyboard Enter) dismiss this dropdown. */}
+      <DropdownMenu open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
+        {/* Hidden trigger — Radix needs a DOM element to anchor the dropdown
+            to. Visually hidden so only the context menu "Model:" row opens it. */}
+        <DropdownMenuTrigger asChild>
+          <span className="sr-only" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64 p-0" side="top" sideOffset={8}>
+          <ModelMenuCloseContext.Provider value={() => setModelMenuOpen(false)}>
+            <ModelCatalogMenu
+              controller={enhanceController}
+              includeMoa={false}
+            />
+          </ModelMenuCloseContext.Provider>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <ModelPill compact={compactModelPill} disabled={disabled} model={state.model} />
       <DictationButton disabled={disabled} onToggle={onDictate} state={state.voice} status={voiceStatus} />
       <AutoSpeakButton active={autoSpeak} disabled={disabled} onToggle={onToggleAutoSpeak} />
