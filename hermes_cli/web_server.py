@@ -6681,6 +6681,133 @@ _ENHANCE_PROMPT_DEFAULT_PROVIDER = "openrouter"
 _ENHANCE_PROMPT_MAX_INPUT = 10000
 
 
+# ---------------------------------------------------------------------------
+# Model search — live query against OpenRouter's /models endpoint.
+# ---------------------------------------------------------------------------
+
+_model_search_cache: dict = {}  # {query_key: (timestamp, result_list)}
+_MODEL_SEARCH_CACHE_TTL = 300   # 5 minutes
+_MODEL_SEARCH_CACHE_MAX = 500
+_model_catalog_cache: Optional[tuple] = None  # (timestamp, [model_id, ...])
+
+
+def _evict_search_cache():
+    """Drop oldest entries when cache exceeds MAX."""
+    while len(_model_search_cache) > _MODEL_SEARCH_CACHE_MAX:
+        oldest_key = min(_model_search_cache, key=lambda k: _model_search_cache[k][0])
+        del _model_search_cache[oldest_key]
+
+
+async def _fetch_openrouter_catalog() -> list:
+    """Fetch the full OpenRouter model catalog, reusing a fresh cache entry."""
+    global _model_catalog_cache
+    import httpx
+
+    now = time.time()
+    if _model_catalog_cache and (now - _model_catalog_cache[0]) < _MODEL_SEARCH_CACHE_TTL:
+        return _model_catalog_cache[1]
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get("https://openrouter.ai/api/v1/models")
+        resp.raise_for_status()
+        data = resp.json()
+    models_raw = data.get("data", []) if isinstance(data, dict) else []
+    if not isinstance(models_raw, list):
+        models_raw = []
+    model_ids: list[str] = []
+    for m in models_raw:
+        if not isinstance(m, dict):
+            continue
+        model_id = str(m.get("id", "") or "")
+        if model_id:
+            model_ids.append(model_id)
+
+    _model_catalog_cache = (now, model_ids)
+    return model_ids
+
+
+@app.get("/api/model/search")
+async def search_models(
+    q: str = "",
+    provider: Optional[str] = None,
+    limit: int = 50,
+):
+    """Search OpenRouter model catalog by substring."""
+    limit = min(max(limit, 1), 200)
+    query = q.strip().lower()
+    provider_filter = (provider or "").strip().lower()
+
+    if provider_filter and provider_filter != "openrouter":
+        return {"models": []}
+    if not query:
+        return {"models": []}
+    if not provider_filter:
+        return {"models": []}
+
+    cache_key = f"{query}|{provider_filter}|{limit}"
+    now_time = time.time()
+    cached = _model_search_cache.get(cache_key)
+    if cached and (now_time - cached[0]) < _MODEL_SEARCH_CACHE_TTL:
+        return {"models": cached[1]}
+
+    try:
+        model_ids = await _fetch_openrouter_catalog()
+    except Exception:
+        _log.exception("GET /api/model/search: failed to fetch models")
+        return {"models": []}
+
+    results: list[str] = []
+    for model_id in model_ids:
+        if query and query not in model_id.lower():
+            continue
+        results.append(model_id)
+        if len(results) >= limit:
+            break
+
+    _model_search_cache[cache_key] = (now_time, results)
+    _evict_search_cache()
+    return {"models": results}
+
+
+def _build_main_runtime_from_config() -> Optional[dict]:
+    """Read the user's main model settings from config.yaml and return a
+    ``main_runtime`` dict compatible with ``call_llm(main_runtime=…)``."""
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config() or {}
+    except Exception:
+        return None
+
+    model_cfg = cfg.get("model") if isinstance(cfg, dict) else None
+    if not isinstance(model_cfg, dict):
+        return None
+
+    provider = str(model_cfg.get("provider", "") or "").strip()
+    model = str(model_cfg.get("default", model_cfg.get("name", "")) or "").strip()
+    base_url = str(model_cfg.get("base_url", "") or "").strip()
+    api_key = str(model_cfg.get("api_key", "") or "").strip()
+
+    if not provider and not base_url:
+        return None
+
+    runtime: dict = {}
+    if provider:
+        runtime["provider"] = provider
+        runtime["requested_provider"] = provider
+    if model:
+        runtime["model"] = model
+    if base_url:
+        runtime["base_url"] = base_url
+    if api_key:
+        runtime["api_key"] = api_key
+
+    api_mode = str(model_cfg.get("api_mode", "") or "").strip()
+    if api_mode:
+        runtime["api_mode"] = api_mode
+
+    return runtime or None
+
+
 @app.post("/api/model/enhance-prompt")
 async def enhance_prompt(body: dict, profile: Optional[str] = None):
     """Rewrite the user's prompt for clarity and effectiveness (non-streaming)."""
