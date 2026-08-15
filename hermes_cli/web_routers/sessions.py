@@ -575,6 +575,61 @@ async def get_session_detail(session_id: str, profile: Optional[str] = None):
         db.close()
 
 
+@manage_router.get("/api/sessions/{session_id}/usage")
+async def get_session_usage(session_id: str, profile: Optional[str] = None):
+    """Return aggregated token usage for a session.  This powers the
+    composer UsageIndicator (cost/hr, tokens/sec)."""
+    db = _open_session_db_for_profile(profile, read_only=True)
+    try:
+        sid = db.resolve_session_id(session_id)
+        if not sid:
+            return {
+                "actual_cost_usd": 0, "api_call_count": 0,
+                "cache_read_tokens": 0, "cache_write_tokens": 0,
+                "elapsed_seconds": 0, "estimated_cost_usd": 0,
+                "input_tokens": 0, "output_tokens": 0,
+                "reasoning_tokens": 0, "tokens_per_second": 0,
+            }
+        row = db.execute(
+            "SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,"
+            "       COALESCE(SUM(output_tokens), 0) AS output_tokens,"
+            "       COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,"
+            "       COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,"
+            "       COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,"
+            "       COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd,"
+            "       COALESCE(SUM(actual_cost_usd), 0) AS actual_cost_usd,"
+            "       COALESCE(SUM(api_call_count), 0) AS api_call_count"
+            "  FROM session_model_usage"
+            "  WHERE session_id = ?",
+            (sid,),
+        ).fetchone()
+        if not row:
+            return {
+                "actual_cost_usd": 0, "api_call_count": 0,
+                "cache_read_tokens": 0, "cache_write_tokens": 0,
+                "elapsed_seconds": 0, "estimated_cost_usd": 0,
+                "input_tokens": 0, "output_tokens": 0,
+                "reasoning_tokens": 0, "tokens_per_second": 0,
+            }
+        out_tokens = row["output_tokens"] or 0
+        elapsed = row["api_call_count"] * 2.0  # rough estimate
+        tps = out_tokens / elapsed if elapsed > 0 else 0
+        return {
+            "actual_cost_usd": row["actual_cost_usd"] or 0,
+            "api_call_count": row["api_call_count"] or 0,
+            "cache_read_tokens": row["cache_read_tokens"] or 0,
+            "cache_write_tokens": row["cache_write_tokens"] or 0,
+            "elapsed_seconds": elapsed,
+            "estimated_cost_usd": row["estimated_cost_usd"] or 0,
+            "input_tokens": row["input_tokens"] or 0,
+            "output_tokens": out_tokens,
+            "reasoning_tokens": row["reasoning_tokens"] or 0,
+            "tokens_per_second": tps,
+        }
+    finally:
+        db.close()
+
+
 @manage_router.get("/api/sessions/{session_id}/latest-descendant")
 async def get_session_latest_descendant(
     session_id: str,
