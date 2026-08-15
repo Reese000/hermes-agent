@@ -27,7 +27,8 @@ import {
 // to the screen corner). Positioning is side="top" align="start" so it
 // appears above the composer controls, near the enhance button.
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
+import { Tip, TipKeybindLabel, Tooltip, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip as TooltipPrimitive } from 'radix-ui'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import {
@@ -180,24 +181,32 @@ export function ComposerControls({
                   `[&>*]:!inline-flex` rule which otherwise collapses both
                   spans onto one line. The hint line uses 9px italic faded
                   text to visually de-emphasize it. ──────────────────────── */}
-              <Tip label={enhancing ? c.enhancing : (
-                <>
-                  <span className="!block">{c.enhance} — {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
-                  <span className="!block text-[9px] italic opacity-50">right-click to configure</span>
-                </>
-              )}>
-                <Button
-                  aria-label={enhancing ? c.enhancing : c.enhance}
-                  className={cn(GHOST_ICON_BTN, 'p-0')}
-                  disabled={disabled}
-                  onClick={enhancing ? onCancelEnhance : onEnhance}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  {enhancing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className={iconSize.sm} />}
-                </Button>
-              </Tip>
+              <Tooltip delayDuration={200}>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={enhancing ? c.enhancing : c.enhance}
+                    className={cn(GHOST_ICON_BTN, 'p-0')}
+                    disabled={disabled}
+                    onClick={enhancing ? onCancelEnhance : onEnhance}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {enhancing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className={iconSize.sm} />}
+                  </Button>
+                </TooltipTrigger>
+                  <TooltipPrimitive.Content
+                    className="pointer-events-none z-(--z-over-modal) rounded-md bg-foreground px-2 py-1.5 text-[11px] text-background"
+                    sideOffset={6}
+                  >
+                    {enhancing ? c.enhancing : (
+                      <div className="flex flex-col gap-0.5">
+                        <span>{c.enhance} — {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
+                        <span className="text-[9px] italic opacity-50">right-click to configure</span>
+                      </div>
+                    )}
+                  </TooltipPrimitive.Content>
+              </Tooltip>
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent className="w-64">

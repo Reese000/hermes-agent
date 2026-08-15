@@ -113,6 +113,7 @@ export function ChatBar({
   onTranscribeAudio
 }: ChatBarProps) {
   const hudMode = useStore($hudMode)
+  const enhanceProfile = useStore($enhanceProfile)
   const { grabbing: hudGrabbing, onPointerDown: onHudDragPointerDown } = useHudComposerDrag(hudMode)
 
   // Typed stop phrase during an active voice conversation ends it — same
@@ -400,7 +401,7 @@ export function ChatBar({
         flushResolve = null
       }
 
-      for await (const chunk of enhancePromptStream(text, sessionId, controller.signal)) {
+      for await (const chunk of enhancePromptStream(text, sessionId, enhanceProfile, controller.signal)) {
         if (sessionIdRef.current !== sessionId) {
           if (rafId != null) cancelAnimationFrame(rafId)
           return

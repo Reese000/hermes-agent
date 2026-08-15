@@ -7122,10 +7122,10 @@ def set_moa_models(body: MoaConfigPayload, profile: Optional[str] = None):
 
 # ── Prompt Enhancement ────────────────────────────────────────────────────
 _enhance_prompt_last_call: dict = {}
-_ENHANCE_PROMPT_MIN_INTERVAL = 3.0
-_ENHANCE_PROMPT_DEFAULT_MODEL = "xiaomi/mimo-v2.5"
+_ENHANCE_PROMPT_MIN_INTERVAL = 0.0
+_ENHANCE_PROMPT_DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
 _ENHANCE_PROMPT_DEFAULT_PROVIDER = "openrouter"
-_ENHANCE_PROMPT_MAX_INPUT = 10000
+_ENHANCE_PROMPT_MAX_INPUT = 999999
 
 
 # ---------------------------------------------------------------------------
@@ -7281,7 +7281,7 @@ async def enhance_prompt(body: dict, profile: Optional[str] = None):
         return {"enhanced": text, "ok": False, "error": "text_too_long"}
 
     try:
-        mesgs, provider_kw, model_kw, main_runtime, max_tokens = _build_enhance_context(text, session_id)
+        mesgs, provider_kw, model_kw, main_runtime, max_tokens = _build_enhance_context(text, session_id, body.get("profile", "") or "balanced")
     except Exception as exc:
         return {"enhanced": text, "ok": False, "error": str(exc)[:200]}
 
@@ -7290,7 +7290,7 @@ async def enhance_prompt(body: dict, profile: Optional[str] = None):
         resp = call_llm(
             task="prompt_enhance", **provider_kw, **model_kw,
             messages=mesgs, temperature=0.3, max_tokens=max_tokens,
-            timeout=120, main_runtime=main_runtime,
+            timeout=300, main_runtime=main_runtime,
         )
         enhanced = (resp.choices[0].message.content or "").strip()
         if not enhanced:
@@ -7301,7 +7301,7 @@ async def enhance_prompt(body: dict, profile: Optional[str] = None):
         return {"enhanced": text, "ok": False, "error": str(exc)[:200]}
 
 
-def _build_enhance_context(text: str, session_id: Optional[str]):
+def _build_enhance_context(text: str, session_id: Optional[str], profile: str = "balanced"):
     """Build messages, kwargs, and config for the enhance LLM call."""
     import time as _et
     _et0 = _et.monotonic()
@@ -7325,13 +7325,13 @@ def _build_enhance_context(text: str, session_id: Optional[str]):
                         project_dir = git_root or cwd
                         sys_prompt = str(session.get("system_prompt", "") or "")
                         if sys_prompt and len(sys_prompt) > 50:
-                            sp_block = sys_prompt[:1000] if len(sys_prompt) > 1000 else sys_prompt
+                            sp_block = sys_prompt
                             system_prompt_suffix = (
                                 "Agent system prompt (memory/rules):\n" + sp_block
                             )
                     conv = db.get_messages_as_conversation(sid, repair_alternation=True)
                     if conv and len(conv) > 2:
-                        recent = conv[-5:]
+                        recent = conv[-15:]
                         lines: list[str] = []
                         for m in recent:
                             role = str(m.get("role", "") or "")
@@ -7341,7 +7341,7 @@ def _build_enhance_context(text: str, session_id: Optional[str]):
                             if not content.strip():
                                 continue
                             if len(content) > 300:
-                                content = content[:300] + "…"
+                                content = content[:2000] if len(content) > 2000 else content
                             lines.append(f"[{role}]: {content}")
                         if lines:
                             context_block = "Recent conversation:\n" + "\n".join(lines)
@@ -7354,15 +7354,44 @@ def _build_enhance_context(text: str, session_id: Optional[str]):
     _log.warning(f"[enhance-timing] context_gather={(_et1-_et0)*1000:.0f}ms")
 
     is_empty = not text
+    # Read enhance profile from request body (sent by frontend)
+    enhance_profile = profile
+
+    profile_prompts = {
+        "syntax": (
+            "Focus ONLY on code syntax, structure, and technical precision. "
+            "Preserve the user's exact intent. Add file paths, function names, "
+            "and type signatures where missing. Never add context or explanation."
+        ),
+        "minimal": (
+            "Make the smallest changes needed to make the prompt clearer. "
+            "Preserve the user's voice exactly. Only add what's genuinely "
+            "missing — a file path, a constraint, a specific term. Never rewrite."
+        ),
+        "balanced": (
+            "Refine for clarity and effectiveness. Preserve the user's voice "
+            "and intent. Add specificity where it helps (file paths, constraints, "
+            "expected output format). Remove ambiguity. Never add filler, "
+            "politeness, or hedges. The result should read like the user "
+            "wrote it — just sharper."
+        ),
+        "maximum": (
+            "Maximize clarity and completeness. Preserve the user's core intent "
+            "but add: specific file/function references from context, expected "
+            "output format, constraints, edge cases, and acceptance criteria. "
+            "The prompt should be self-contained — the agent needs no follow-up "
+            "questions. Never add politeness or padding."
+        ),
+    }
+
     system_parts = [
-        "Refine the user's prompt for the agent. Rules:",
-        "• IMPROVE it — don't echo or drift.",
-        "• Match their style (terse → terse, specific → specific).",
+        "You refine prompts for an AI agent. Rules:",
+        "• Output ONLY the refined prompt text — no explanation, no wrapper.",
+        "• Preserve the user's voice: terse → terse, specific → specific.",
+        "• Never add politeness, hedges, questions, or padding.",
         "• Use exact terms from conversation context.",
-        "• Name files/functions/configs explicitly.",
-        "• Never add politeness, hedges, or padding.",
-        "• Never ask questions — output only the refined prompt.",
-        "OUTPUT: Only the prompt text.",
+        "• Name files, functions, configs, and commands explicitly.",
+        profile_prompts.get(enhance_profile, profile_prompts["balanced"]),
     ]
 
     if is_empty:
@@ -7403,7 +7432,7 @@ def _build_enhance_context(text: str, session_id: Optional[str]):
     if not provider_kw:
         provider_kw["provider"] = _ENHANCE_PROMPT_DEFAULT_PROVIDER
 
-    max_tokens = min(len(text) * 2, 800)
+    max_tokens = min(max(len(text) * 3, 2000), 8000)
 
     _et2 = _et.monotonic()
     _log.warning(f"[enhance-timing] prompt_build={(_et2-_et1)*1000:.0f}ms total={(_et2-_et0)*1000:.0f}ms")
@@ -7445,7 +7474,7 @@ async def enhance_prompt_stream(body: dict, profile: Optional[str] = None):
         try:
             from starlette.concurrency import run_in_threadpool
             mesgs, provider_kw, model_kw, main_runtime, max_tokens = \
-                await run_in_threadpool(_build_enhance_context, text, session_id)
+                await run_in_threadpool(_build_enhance_context, text, session_id, body.get("profile", "") or "balanced")
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)[:200]})}\n\n"
             yield "data: [DONE]\n\n"

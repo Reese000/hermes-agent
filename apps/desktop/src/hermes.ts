@@ -1780,18 +1780,15 @@ export function getSessionUsage(sessionId: string): Promise<SessionUsageResponse
 export function enhancePrompt(
   text: string,
   sessionId?: string | null,
+  profile?: string | null,
   signal?: AbortSignal
 ): Promise<EnhancePromptResponse> {
   return window.hermesDesktop.api<EnhancePromptResponse>({
     ...profileScoped(),
     path: '/api/model/enhance-prompt',
     method: 'POST',
-    body: { prompt: text, session_id: sessionId || undefined },
+    body: { prompt: text, session_id: sessionId || undefined, profile: profile || undefined },
     signal,
-    // No timeout — enhance can take a while for long prompts or slow models.
-    // The backend has its 120s LLM timeout; we just need the IPC layer to
-    // not cut off before that. Use a large value instead of 0 because
-    // resolveTimeoutMs treats 0 as "use default" (15s).
     timeoutMs: 300_000
   })
 }
@@ -1803,12 +1800,13 @@ export function enhancePrompt(
 export async function* enhancePromptStream(
   text: string,
   sessionId?: string | null,
+  profile?: string | null,
   signal?: AbortSignal
 ): AsyncGenerator<string, void, unknown> {
   if (!window.hermesDesktop?.apiStream) {
     console.log('[enhance] apiStream not available, falling back to non-streaming')
     // Fallback to non-streaming if the preload bridge doesn't have apiStream
-    const res = await enhancePrompt(text, sessionId, signal)
+    const res = await enhancePrompt(text, sessionId, profile, signal)
     if (res.ok && res.enhanced) {
       yield res.enhanced
     }
@@ -1827,7 +1825,7 @@ export async function* enhancePromptStream(
       ...profileScoped(),
       path: '/api/model/enhance-prompt-stream',
       method: 'POST',
-      body: { prompt: text, session_id: sessionId || undefined },
+      body: { prompt: text, session_id: sessionId || undefined, profile: profile || undefined },
       timeoutMs: 300_000
     },
     {
