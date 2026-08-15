@@ -1454,3 +1454,16 @@ export interface ModelAssignmentResponse {
   stale_aux?: StaleAuxAssignment[]
   tasks?: string[]
 }
+
+export interface SessionUsageResponse {
+  actual_cost_usd: number
+  api_call_count: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  elapsed_seconds: number
+  estimated_cost_usd: number
+  input_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  tokens_per_second: number
+}
