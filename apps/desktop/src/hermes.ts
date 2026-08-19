@@ -1789,6 +1789,10 @@ export function enhancePrompt(
     method: 'POST',
     body: { prompt: text, session_id: sessionId || undefined, profile: profile || undefined },
     signal,
+    // No timeout — enhance can take a while for long prompts or slow models.
+    // The backend has its 120s LLM timeout; we just need the IPC layer to
+    // not cut off before that. Use a large value instead of 0 because
+    // resolveTimeoutMs treats 0 as "use default" (15s).
     timeoutMs: 300_000
   })
 }

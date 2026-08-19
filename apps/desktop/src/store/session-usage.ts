@@ -55,7 +55,7 @@ const EMPTY_USAGE: SessionUsageData = {
  *  index.tsx) blend smoothly, while a slightly-delayed poll counts more
  *  heavily instead of being dragged down by a now-stale reading. Gaps beyond
  *  MAX_SAMPLE_GAP_S skip this blending entirely — see updateSmoothedRate. */
-const RATE_SMOOTHING_TAU_S = 60
+const RATE_SMOOTHING_TAU_S = 30
 
 /** Ceiling (seconds) on the gap between two polls that's still trusted as
  *  one continuous observation window — a few multiples of the 15s
