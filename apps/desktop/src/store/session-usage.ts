@@ -55,7 +55,7 @@ const EMPTY_USAGE: SessionUsageData = {
  *  index.tsx) blend smoothly, while a slightly-delayed poll counts more
  *  heavily instead of being dragged down by a now-stale reading. Gaps beyond
  *  MAX_SAMPLE_GAP_S skip this blending entirely — see updateSmoothedRate. */
-const RATE_SMOOTHING_TAU_S = 30
+const RATE_SMOOTHING_TAU_S = 60
 
 /** Ceiling (seconds) on the gap between two polls that's still trusted as
  *  one continuous observation window — a few multiples of the 15s
@@ -139,7 +139,10 @@ function updateSmoothedRate(sessionId: string, data: SessionUsageResponse): void
   const prevRate = $smoothedRateBySession.get()[sessionId]
 
   const nextRate: SmoothedRate = {
-    tokensPerSecond: prevRate ? alpha * windowTps + (1 - alpha) * prevRate.tokensPerSecond : windowTps,
+    tokensPerSecond: Math.min(
+      prevRate ? alpha * windowTps + (1 - alpha) * prevRate.tokensPerSecond : windowTps,
+      200  // cap: no model sustains >200 t/s; spikes above this are measurement noise
+    ),
     costPerHour: prevRate ? alpha * windowCostPerHour + (1 - alpha) * prevRate.costPerHour : windowCostPerHour
   }
 
