@@ -33,6 +33,11 @@ class Mem0Backend(ABC):
     def delete(self, memory_id: str) -> dict:
         ...
 
+    @abstractmethod
+    def list_all(self, *, filters: dict) -> list[dict]:
+        """Return all memories matching the given filters (e.g. user_id)."""
+        ...
+
     def close(self) -> None:
         pass
 
@@ -78,6 +83,10 @@ class PlatformBackend(Mem0Backend):
     def delete(self, memory_id: str) -> dict:
         self._client.delete(memory_id=memory_id)
         return {"result": "Memory deleted.", "memory_id": memory_id}
+
+    def list_all(self, *, filters: dict) -> list[dict]:
+        response = self._client.get_all(filters=filters)
+        return _unwrap_results(response)
 
 
 class SelfHostedBackend(Mem0Backend):
@@ -145,6 +154,12 @@ class SelfHostedBackend(Mem0Backend):
     def delete(self, memory_id: str) -> dict:
         self._json("DELETE", f"/memories/{memory_id}")
         return {"result": "Memory deleted.", "memory_id": memory_id}
+
+    def list_all(self, *, filters: dict) -> list[dict]:
+        body: dict[str, Any] = {}
+        if filters:
+            body["filters"] = filters
+        return _unwrap_results(self._json("GET", "/memories", params=body))
 
     def close(self) -> None:
         try:
@@ -294,6 +309,10 @@ class OSSBackend(Mem0Backend):
     def delete(self, memory_id: str) -> dict:
         self._memory.delete(memory_id)
         return {"result": "Memory deleted.", "memory_id": memory_id}
+
+    def list_all(self, *, filters: dict) -> list[dict]:
+        response = self._memory.get_all(filters=filters)
+        return _unwrap_results(response)
 
     def close(self):
         try:

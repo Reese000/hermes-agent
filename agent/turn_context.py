@@ -1268,7 +1268,27 @@ def build_turn_context(
     if agent._memory_manager:
         try:
             _turn_msg = original_user_message if isinstance(original_user_message, str) else ""
-            agent._memory_manager.on_turn_start(agent._user_turn_count, _turn_msg)
+            # Pass context budget info so providers can do compression-aware
+            # prefetch when context is near the compression threshold.
+            _turn_start_kwargs = {}
+            _cc = getattr(agent, "context_compressor", None)
+            if _cc is not None and messages:
+                _context_limit = getattr(_cc, "context_length", 0) or 0
+                _threshold_tokens = getattr(_cc, "threshold_tokens", 0) or 0
+                if _context_limit > 0 and _threshold_tokens > 0:
+                    _current_tokens = estimate_messages_tokens_rough(messages)
+                    _remaining = max(0, _context_limit - _current_tokens)
+                    _turn_start_kwargs["remaining_tokens"] = _remaining
+                    _turn_start_kwargs["context_limit"] = _context_limit
+                    # Pass the oldest messages (most at risk of compression)
+                    # so providers can prefetch from their content.
+                    _protect_first = getattr(_cc, "protect_first_n", 0) or 0
+                    _old_msgs = messages[_protect_first:max(_protect_first + 5, 10)]
+                    if _old_msgs:
+                        _turn_start_kwargs["old_messages"] = _old_msgs
+            agent._memory_manager.on_turn_start(
+                agent._user_turn_count, _turn_msg, **_turn_start_kwargs
+            )
         except Exception:
             pass
 

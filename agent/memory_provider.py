@@ -174,6 +174,11 @@ class MemoryProvider(ABC):
         session_id is provided for providers serving concurrent sessions
         (gateway group chats, cached agents). Providers that don't need
         per-session scoping can ignore it.
+
+        topic_fingerprint (optional): list of keywords extracted from the
+        current conversation for cross-session identity resolution.
+        Providers that support cross-session memory can use this to
+        search for related memories from past sessions.
         """
         return ""
 
@@ -298,6 +303,10 @@ class MemoryProvider(ABC):
             ``True`` if session_id is unchanged but the transcript was
             truncated; providers caching per-turn document state should
             invalidate.
+        first_message:
+            The first user message in the new session, when available.
+            Providers supporting cross-session identity resolution can
+            use this to prefetch related memories from past sessions.
 
         Default is no-op for backward compatibility.
         """

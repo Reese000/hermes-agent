@@ -556,6 +556,18 @@ def cmd_status(args) -> None:
             print("\n  Plugin:    NOT installed ✗")
             print(f"  Install the '{provider_name}' memory plugin to ~/.hermes/plugins/")
 
+        # Health metrics (if provider supports it)
+        if provider and hasattr(provider, "get_health_metrics"):
+            try:
+                metrics = provider.get_health_metrics()
+                if metrics:
+                    print("\n  Health metrics:")
+                    for key, val in metrics.items():
+                        label = key.replace("_", " ").title()
+                        print(f"    {label}: {val}")
+            except Exception:
+                pass
+
     if providers:
         print("\n  Installed plugins:")
         for pname, desc, _ in providers:

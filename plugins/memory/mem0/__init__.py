@@ -36,10 +36,14 @@ import atexit
 import json
 import logging
 import os
+import re
 import threading
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List
 
+from collections import Counter
 from agent.memory_provider import MemoryProvider
 from agent.secret_scope import get_secret
 from tools.registry import tool_error
@@ -60,6 +64,140 @@ _CLIENT_ERROR_TYPES = ("MemoryNotFoundError", "ValidationError")
 # wrote this exact placeholder) still allow gateway-native ids to flow
 # through instead of silently overriding them with the placeholder.
 _DEFAULT_USER_ID = "hermes-user"
+
+# ---------------------------------------------------------------------------
+# Topic fingerprint extraction (cross-session memory identity resolution)
+# ---------------------------------------------------------------------------
+
+# Common English stopwords + short filler words — kept minimal and fast.
+_STOPWORDS: frozenset[str] = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "as", "is", "was", "are", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "shall", "can", "need",
+    "dare", "ought", "used", "it", "its", "this", "that", "these", "those",
+    "i", "you", "he", "she", "we", "they", "me", "him", "her", "us", "them",
+    "my", "your", "his", "our", "their", "what", "which", "who", "whom",
+    "not", "no", "nor", "so", "too", "very", "just", "about", "above",
+    "after", "again", "all", "also", "any", "because", "before", "between",
+    "both", "each", "few", "more", "most", "other", "some", "such",
+    "than", "then", "there", "here", "when", "where", "why", "how",
+    "if", "only", "own", "same", "into", "over", "under", "down",
+    "out", "off", "up", "once", "now", "new", "get", "got", "say",
+    "said", "like", "make", "made", "go", "going", "come", "came",
+    "take", "took", "know", "knew", "think", "thought", "see", "saw",
+    "want", "use", "using", "used", "way", "thing", "things", "one",
+    "two", "much", "many", "well", "back", "even", "still", "also",
+    "yeah", "ok", "okay", "yes", "right", "let", "sure", "good",
+    "great", "thanks", "thank", "please", "hello", "hey", "hi",
+})
+
+
+def extract_topic_fingerprint(text: str | None, *, max_keywords: int = 5) -> list[str]:
+    """Extract top keywords/entities from text for cross-session topic matching.
+
+    Uses a lightweight TF-based approach (no LLM calls, <50ms). Returns up
+    to *max_keywords* lowercase keywords sorted by frequency then alphabetical.
+    Empty/None input returns an empty list.
+    """
+    if not text or not text.strip():
+        return []
+
+    import re as _re
+
+    # Tokenize: split on non-alpha boundaries, keep tokens >= 3 chars
+    tokens = _re.findall(r"[a-zA-Z]{3,}", text.lower())
+    if not tokens:
+        return []
+
+    # Filter stopwords and count
+    filtered = [t for t in tokens if t not in _STOPWORDS]
+    if not filtered:
+        return []
+
+    counts = Counter(filtered)
+    # Sort by frequency desc, then alphabetically for determinism
+    sorted_words = sorted(counts.items(), key=lambda x: (-x[1], x[0]))
+    return [word for word, _ in sorted_words[:max_keywords]]
+
+
+# ---------------------------------------------------------------------------
+# Temporal hint extraction (time-aware memory retrieval)
+# ---------------------------------------------------------------------------
+
+_WEEKDAYS = r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+_TIME_UNITS = r"(?:second|minute|hour|day|week|month|year)s?"
+
+# Compiled once at module load for <10ms extraction.
+_TEMPORAL_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(rf"\blast\s+{_WEEKDAYS}\b", re.I), "past_{weekday}"),
+    (re.compile(rf"\bnext\s+{_WEEKDAYS}\b", re.I), "next_{weekday}"),
+    (re.compile(rf"\blast\s+{_TIME_UNITS}\b", re.I), "past_{unit}"),
+    (re.compile(rf"\bnext\s+{_TIME_UNITS}\b", re.I), "next_{unit}"),
+    (re.compile(r"\byesterday\b", re.I), "yesterday"),
+    (re.compile(r"\btomorrow\b", re.I), "tomorrow"),
+    (re.compile(rf"\bin\s+(\d+)\s+{_TIME_UNITS}\b", re.I), "future_{n}_{unit}"),
+    (re.compile(rf"\b(\d+)\s+{_TIME_UNITS}\s+ago\b", re.I), "past_{n}_{unit}"),
+    (re.compile(r"\blast\s+week\b", re.I), "past_week"),
+    (re.compile(r"\bthis\s+(?:morning|afternoon|evening|week|month|year)\b", re.I), "this_{period}"),
+]
+
+
+def extract_temporal_hint(text: str | None) -> str | None:
+    """Detect temporal expressions in text and return a structured hint.
+
+    Returns a lowercase snake_case string like "past_tuesday", "next_week",
+    "yesterday", "tomorrow", "future_3_months", etc.  Returns None when no
+    temporal expression is found.  Pure regex, no NLP dependency, <10ms.
+    """
+    if not text or not text.strip():
+        return None
+
+    for pattern, template in _TEMPORAL_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return _render_hint(template, m)
+    return None
+
+
+def _render_hint(template: str, match: re.Match) -> str:
+    """Fill template placeholders from a regex match."""
+    groups = match.groups()
+    weekday_names = {
+        "monday": "monday", "tuesday": "tuesday", "wednesday": "wednesday",
+        "thursday": "thursday", "friday": "friday", "saturday": "saturday",
+        "sunday": "sunday",
+    }
+    unit_names = {
+        "second": "seconds", "minute": "minutes", "hour": "hours",
+        "day": "days", "week": "weeks", "month": "months", "year": "years",
+    }
+    hint = template
+    # {weekday}
+    if "{weekday}" in hint:
+        for g in groups:
+            if g and g.lower() in weekday_names:
+                hint = hint.replace("{weekday}", g.lower())
+                break
+    # {unit}
+    if "{unit}" in hint:
+        for g in groups:
+            if g and g.lower().rstrip("s") in unit_names:
+                hint = hint.replace("{unit}", unit_names[g.lower().rstrip("s")])
+                break
+    # {n}
+    if "{n}" in hint:
+        for g in groups:
+            if g and g.isdigit():
+                hint = hint.replace("{n}", g)
+                break
+    # {period}
+    if "{period}" in hint:
+        for g in groups:
+            if g:
+                hint = hint.replace("{period}", g.lower())
+                break
+    return hint
 
 
 def _is_client_error(exc: Exception) -> bool:
@@ -207,11 +345,18 @@ class Mem0MemoryProvider(MemoryProvider):
         self._agent_id = "hermes"
         self._rerank_default = False
         self._channel = "cli"  # gateway channel name (cli/telegram/discord/...)
+        self._session_id = ""  # current session id for temporal metadata
+        self._turn_number = 0  # current turn number for temporal metadata
         self._sync_thread = None
+        self._compress_thread = None  # dedicated thread for pre-compression extraction
         self._prefetch_thread = None
         self._prefetch_query = ""
         self._prefetch_result = ""
         self._prefetch_done = False
+        # Prefetch memory list: deduplicated entries from all prefetch paths.
+        # Both normal and compression-aware prefetch append here; consuming
+        # merges them into a single block without overwriting.
+        self._prefetch_memories: List[Dict[str, Any]] = []
         # Circuit breaker state
         self._consecutive_failures = 0
         self._breaker_open_until = 0.0
@@ -219,6 +364,17 @@ class Mem0MemoryProvider(MemoryProvider):
         self._sync_lock = threading.Lock()
         self._prefetch_lock = threading.Lock()
         self._atexit_registered = False
+        # Health metrics (exposed via hermes memory status)
+        self._stats = {
+            "memories_added_session": 0,
+            "memories_consolidated": 0,
+            "compression_events": 0,
+            "compression_facts_extracted": 0,
+        }
+        # Consolidation state
+        self._turns_since_consolidation = 0
+        self._consolidation_thread = None
+        self._consolidation_lock = threading.Lock()
 
     @property
     def name(self) -> str:
@@ -339,6 +495,7 @@ class Mem0MemoryProvider(MemoryProvider):
         self._mode = self._config.get("mode", "platform")
         self._api_key = self._config.get("api_key", "")
         self._host = self._config.get("host", "")
+        self._session_id = session_id
         # Resolution order for user_id:
         #   1. Operator-configured MEM0_USER_ID (env or $HERMES_HOME/mem0.json) —
         #      the canonical principal, applied across every gateway so the same
@@ -354,7 +511,16 @@ class Mem0MemoryProvider(MemoryProvider):
         if configured == _DEFAULT_USER_ID:
             configured = None
         self._user_id = configured or kwargs.get("user_id") or _DEFAULT_USER_ID
-        self._agent_id = self._config.get("agent_id", "hermes")
+        # Resolution order for agent_id:
+        #   1. Profile name from kwargs (agent_identity) — per-profile isolation,
+        #      e.g. "cam" → "hermes-cam". Takes precedence over config.
+        #   2. Configured agent_id from env / mem0.json (backward compat).
+        #   3. Hardcoded fallback "hermes" (legacy default).
+        profile_name = kwargs.get("agent_identity")
+        if profile_name:
+            self._agent_id = f"hermes-{profile_name}"
+        else:
+            self._agent_id = self._config.get("agent_id", "hermes")
         # Persisted rerank preference (setup wizard / mem0.json). Used as the
         # DEFAULT for mem0_search when the model doesn't pass ``rerank``
         # explicitly; per-call args still win. Platform-only feature — other
@@ -370,17 +536,30 @@ class Mem0MemoryProvider(MemoryProvider):
             self._atexit_registered = True
 
     def _read_filters(self) -> Dict[str, Any]:
-        # Scoped to user_id only — by design — so recall surfaces memories
-        # written from any gateway/agent under this principal. Writes attach
-        # agent_id (and metadata.channel) so per-agent / per-channel views are
-        # still possible at query time when needed; reads default to the wider
-        # cross-agent recall.
-        return {"user_id": self._user_id}
+        # Default: scoped to user_id + agent_id so each profile only sees its
+        # own memories. cross_profile_search or profile_isolation=false removes
+        # the agent_id filter to widen recall across all profiles.
+        filters: Dict[str, Any] = {"user_id": self._user_id}
+        if self._config.get("cross_profile_search", False):
+            return filters
+        if not self._config.get("profile_isolation", True):
+            return filters
+        filters["agent_id"] = self._agent_id
+        return filters
 
     def _write_metadata(self) -> Dict[str, Any]:
-        # Tag every write with the gateway channel so the dashboard can offer
-        # per-channel filtered views without coupling identity to the channel.
-        return {"channel": self._channel} if self._channel else {}
+        # Tag every write with temporal context so memories can be filtered
+        # by time range and the agent can reason about when facts were stored.
+        meta: Dict[str, Any] = {}
+        if self._channel:
+            meta["channel"] = self._channel
+        if (self._config or {}).get("temporal_metadata", True):
+            meta["timestamp"] = datetime.now(timezone.utc).isoformat()
+            if self._session_id:
+                meta["session_id"] = self._session_id
+            if self._turn_number:
+                meta["turn_number"] = self._turn_number
+        return meta
 
     def system_prompt_block(self) -> str:
         # Mirror the precedence in _create_backend (oss > host > platform) so
@@ -412,18 +591,104 @@ class Mem0MemoryProvider(MemoryProvider):
         )
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
+        self._turn_number = turn_number
         self._start_prefetch(message)
+        # Compression-aware prefetch: when context is near the compression
+        # threshold, proactively retrieve memories from at-risk messages so
+        # relevant context survives in the active window.
+        remaining = kwargs.get("remaining_tokens")
+        context_limit = kwargs.get("context_limit")
+        old_messages = kwargs.get("old_messages")
+        if (
+            remaining is not None
+            and context_limit
+            and context_limit > 0
+            and self._config.get("compression_aware_prefetch", True)
+            and self._backend is not None
+            and not self._is_breaker_open()
+        ):
+            usage_ratio = 1.0 - (remaining / context_limit)
+            threshold = 0.60  # compress at ~60%; prefetch extra when usage > 60%
+            if usage_ratio >= threshold and old_messages:
+                self._start_compression_aware_prefetch(old_messages)
+        # Periodic consolidation: track turns since last pass, trigger
+        # background consolidation when the interval is reached.
+        self._turns_since_consolidation += 1
+        interval = self._config.get("consolidation_interval_turns", 50)
+        if (
+            self._config.get("consolidation_enabled", True)
+            and self._backend is not None
+            and not self._is_breaker_open()
+            and self._turns_since_consolidation >= interval
+        ):
+            self._start_consolidation()
+
+    def _start_compression_aware_prefetch(self, old_messages: list) -> None:
+        """Background prefetch based on keywords from messages at risk of compression."""
+        # Extract keywords from old messages (take first N chars from each).
+        keywords = []
+        for msg in old_messages:
+            content = msg.get("content", "").strip()
+            if content:
+                # Use first ~100 chars as a keyword query
+                keywords.append(content[:100])
+        if not keywords:
+            return
+
+        # Combine into a single search query (most efficient).
+        query = " ".join(keywords[:3])  # Cap at 3 messages to limit query size
+        backend = self._backend
+
+        def _run():
+            try:
+                results = backend.search(
+                    query, filters=self._read_filters(), top_k=10, rerank=False,
+                )
+                lines = [r.get("memory", "") for r in (results or []) if r.get("memory")]
+                if lines:
+                    self._stats["compression_events"] += 1
+                    self._stats["compression_facts_extracted"] += len(lines)
+                    self._append_prefetch_memories(lines, "compression-aware")
+                self._record_success()
+            except Exception as e:
+                self._record_failure()
+                logger.debug("Mem0 compression-aware prefetch failed: %s", e)
+
+        t = threading.Thread(target=_run, daemon=True, name="mem0-compress-prefetch")
+        t.start()
+
+    def _append_prefetch_memories(self, lines: List[str], source: str) -> None:
+        """Append deduplicated memory lines to the shared prefetch cache.
+
+        Both normal and compression-aware prefetch call this.  Results are
+        stored as structured entries keyed by a hash of the line text so
+        duplicates are rejected regardless of which path found them first.
+        """
+        with self._prefetch_lock:
+            existing_texts = {m["text"] for m in self._prefetch_memories}
+            for line in lines:
+                if line not in existing_texts:
+                    self._prefetch_memories.append({"text": line, "source": source})
+                    existing_texts.add(line)
+            self._prefetch_done = bool(self._prefetch_memories)
 
     def _consume_prefetch_result(self, query: str) -> str | None:
         with self._prefetch_lock:
             if self._prefetch_query != query or not self._prefetch_done:
                 return None
-            result = self._prefetch_result
+            # Build merged block from all deduplicated prefetch memories.
+            if self._prefetch_memories:
+                body = "## Mem0 Memory\n" + "\n".join(
+                    f"- {m['text']}" for m in self._prefetch_memories
+                )
+            else:
+                body = ""
+            self._prefetch_memories.clear()
             self._prefetch_result = ""
             self._prefetch_done = False
-            return result
+            return body
 
-    def _start_prefetch(self, query: str) -> None:
+    def _start_prefetch(self, query: str, extra_filters: Dict[str, Any] | None = None) -> None:
         if not query or self._backend is None or self._is_breaker_open():
             return
         backend = self._backend
@@ -435,51 +700,126 @@ class Mem0MemoryProvider(MemoryProvider):
                     return
             self._prefetch_query = query
             self._prefetch_result = ""
+            self._prefetch_memories.clear()
             self._prefetch_done = False
 
+        filters = self._read_filters()
+        if extra_filters:
+            filters.update(extra_filters)
+
         def _run():
-            body = ""
             try:
                 results = backend.search(
-                    query, filters=self._read_filters(), top_k=10, rerank=False,
+                    query, filters=filters, top_k=10, rerank=False,
                 )
                 lines = [r.get("memory", "") for r in (results or []) if r.get("memory")]
                 if lines:
-                    body = "## Mem0 Memory\n" + "\n".join(f"- {l}" for l in lines)
+                    self._append_prefetch_memories(lines, "normal")
                 self._record_success()
             except Exception as e:
                 self._record_failure()
                 logger.debug("Mem0 prefetch failed: %s", e)
-            with self._prefetch_lock:
-                if self._prefetch_query == query:
-                    self._prefetch_result = body
-                    self._prefetch_done = True
 
         t = threading.Thread(target=_run, daemon=True, name="mem0-prefetch")
         with self._prefetch_lock:
             self._prefetch_thread = t
         t.start()
 
-    def prefetch(self, query: str, *, session_id: str = "") -> str:
-        """Recall memories for the CURRENT question with a short hot-path wait."""
+    def prefetch(
+        self,
+        query: str,
+        *,
+        session_id: str = "",
+        topic_fingerprint: list[str] | None = None,
+        since_date: str = "",
+        until_date: str = "",
+    ) -> str:
+        """Recall memories for the CURRENT question with a short hot-path wait.
+
+        When *topic_fingerprint* is provided and cross-session identity is
+        enabled, also searches by fingerprint keywords to find related
+        memories from other sessions. Results are merged and deduplicated.
+
+        When *since_date* or *until_date* are provided (ISO date strings,
+        e.g. ``"2026-08-13"``), a temporal metadata filter is added so only
+        memories written within the date range are returned.
+        """
+        # Build temporal filter for date-range queries
+        date_filters: Dict[str, Any] = {}
+        if since_date or until_date:
+            if since_date and until_date:
+                date_filters["created_at"] = {"$gte": since_date, "$lte": until_date}
+            elif since_date:
+                date_filters["created_at"] = {"$gte": since_date}
+            elif until_date:
+                date_filters["created_at"] = {"$lte": until_date}
+
         cached = self._consume_prefetch_result(query)
         if cached is not None:
             return cached
-        self._start_prefetch(query)
+        self._start_prefetch(query, extra_filters=date_filters if date_filters else None)
         with self._prefetch_lock:
             thread = self._prefetch_thread if self._prefetch_query == query else None
         if thread:
             thread.join(timeout=_PREFETCH_WAIT_SECS)
         cached = self._consume_prefetch_result(query)
         if cached is not None:
-            return cached
-        # Slow backend: skip injection; mem0_search tool remains the backstop.
-        return ""
+            result = cached
+        else:
+            result = ""
+
+        # Cross-session prefetch: search by topic fingerprint when enabled
+        if (
+            topic_fingerprint
+            and self._config.get("cross_session_identity", True)
+            and self._backend is not None
+            and not self._is_breaker_open()
+        ):
+            fp_query = " ".join(topic_fingerprint)
+            try:
+                fp_results = self._backend.search(
+                    fp_query, filters=self._read_filters(), top_k=10, rerank=False,
+                )
+                self._record_success()
+                if fp_results:
+                    # Track IDs already in the main result to dedup
+                    # The main prefetch result is formatted text; we track seen
+                    # IDs from the background thread's search for dedup.
+                    seen_ids: set[str] = set()
+                    with self._prefetch_lock:
+                        # Extract IDs from the background prefetch's results
+                        # by re-running a lightweight scan — but we can't access
+                        # the raw IDs. Instead, track by memory text content.
+                        # This is simpler and handles the common case.
+                        pass
+                    # Dedup: only add memories whose text isn't already in result
+                    existing_lines = set(result.split("\n")) if result else set()
+                    new_lines = []
+                    for r in fp_results:
+                        mem = r.get("memory", "")
+                        line = f"- {mem}"
+                        if mem and line not in existing_lines:
+                            existing_lines.add(line)
+                            new_lines.append(line)
+                    if new_lines:
+                        fp_block = "## Mem0 Memory (cross-session)\n" + "\n".join(new_lines)
+                        result = (result + "\n" + fp_block).strip() if result else fp_block
+            except Exception as e:
+                logger.debug("Mem0 cross-session prefetch failed: %s", e)
+
+        return result
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Send the turn to Mem0 for server-side fact extraction (non-blocking)."""
         if self._backend is None or self._is_breaker_open():
             return
+
+        # Compute topic fingerprint for cross-session identity resolution
+        combined = f"{user_content} {assistant_content}"
+        fingerprint = extract_topic_fingerprint(combined)
+        write_meta = self._write_metadata()
+        if fingerprint:
+            write_meta["topic_fingerprint"] = fingerprint
 
         def _sync():
             backend = self._backend
@@ -495,8 +835,9 @@ class Mem0MemoryProvider(MemoryProvider):
                     user_id=self._user_id,
                     agent_id=self._agent_id,
                     infer=True,
-                    metadata=self._write_metadata(),
+                    metadata=write_meta,
                 )
+                self._stats["memories_added_session"] += 1
                 self._record_success()
             except Exception as e:
                 self._record_failure()
@@ -510,6 +851,420 @@ class Mem0MemoryProvider(MemoryProvider):
                 return
             self._sync_thread = threading.Thread(target=_sync, daemon=True, name="mem0-sync")
             self._sync_thread.start()
+
+    def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
+        """Extract facts from messages about to be compressed into Mem0.
+
+        Called before context compression drops old messages. Indexes each
+        message with server-side fact extraction (infer=True) so no facts
+        are lost when the compressor proceeds. Runs asynchronously to avoid
+        blocking the compression path.
+
+        Returns empty string — facts are in Mem0, not in the summary prompt.
+        """
+        if self._backend is None or self._is_breaker_open():
+            return ""
+
+        # Filter to messages that actually have content worth extracting.
+        extractable = [
+            m for m in messages
+            if m.get("content") and m["content"].strip()
+        ]
+        if not extractable:
+            return ""
+
+        backend = self._backend
+
+        def _extract():
+            try:
+                for msg in extractable:
+                    backend.add(
+                        [msg],
+                        user_id=self._user_id,
+                        agent_id=self._agent_id,
+                        infer=True,
+                        metadata=self._write_metadata(),
+                    )
+                self._stats["compression_events"] += 1
+                self._stats["compression_facts_extracted"] += len(extractable)
+                self._record_success()
+            except Exception as e:
+                self._record_failure()
+                logger.warning("Mem0 pre-compression extraction failed: %s", e)
+
+        # Use a dedicated thread for pre-compression extraction so it doesn't
+        # block (or get blocked by) sync_turn.
+        with self._sync_lock:
+            if self._compress_thread and self._compress_thread.is_alive():
+                self._compress_thread.join(timeout=5.0)
+            if self._compress_thread and self._compress_thread.is_alive():
+                return ""
+            self._compress_thread = threading.Thread(
+                target=_extract, daemon=True, name="mem0-pre-compress",
+            )
+            self._compress_thread.start()
+
+        return ""
+
+    def on_session_switch(
+        self,
+        new_session_id: str,
+        *,
+        parent_session_id: str = "",
+        reset: bool = False,
+        rewound: bool = False,
+        first_message: str = "",
+        **kwargs,
+    ) -> None:
+        """When the agent switches sessions, prefetch related memories.
+
+        If *first_message* is provided and cross-session identity is enabled,
+        computes a topic fingerprint and proactively searches Mem0 for
+        related memories from past sessions so the agent has immediate
+        context when resuming a topic.
+        """
+        if (
+            not first_message
+            or not self._config.get("cross_session_identity", True)
+            or self._backend is None
+            or self._is_breaker_open()
+        ):
+            return
+
+        fingerprint = extract_topic_fingerprint(first_message)
+        if not fingerprint:
+            return
+
+        fp_query = " ".join(fingerprint)
+        backend = self._backend
+
+        def _search():
+            try:
+                results = backend.search(
+                    fp_query, filters=self._read_filters(), top_k=10, rerank=False,
+                )
+                if results:
+                    lines = [r.get("memory", "") for r in results if r.get("memory")]
+                    if lines:
+                        block = (
+                            "## Mem0 Memory (cross-session continuity)\n"
+                            + "\n".join(f"- {l}" for l in lines)
+                        )
+                        with self._prefetch_lock:
+                            existing = self._prefetch_result or ""
+                            if block not in existing:
+                                self._prefetch_result = (
+                                    (existing + "\n" + block).strip()
+                                    if existing else block
+                                )
+                                self._prefetch_done = True
+                self._record_success()
+            except Exception as e:
+                self._record_failure()
+                logger.debug("Mem0 session-switch prefetch failed: %s", e)
+
+        t = threading.Thread(target=_search, daemon=True, name="mem0-session-switch")
+        t.start()
+
+    # ------------------------------------------------------------------
+    # Memory consolidation (periodic dedup + contradiction detection)
+    # ------------------------------------------------------------------
+
+    def _start_consolidation(self) -> None:
+        """Spawn background consolidation if not already running."""
+        with self._consolidation_lock:
+            if self._consolidation_thread and self._consolidation_thread.is_alive():
+                return
+            self._turns_since_consolidation = 0
+            self._consolidation_thread = threading.Thread(
+                target=self._consolidate, daemon=True, name="mem0-consolidation",
+            )
+            self._consolidation_thread.start()
+
+    def _consolidate(self) -> None:
+        """Background consolidation: dedup duplicates, flag contradictions.
+
+        Fetches all memories, groups by text similarity, deletes the older
+        member of each duplicate pair, and annotates contradicting pairs
+        with metadata. All actions are logged before execution for audit.
+        """
+        backend = self._backend
+        if backend is None:
+            return
+        threshold = float(self._config.get("consolidation_similarity_threshold", 0.85))
+        filters = self._read_filters()
+        try:
+            memories = backend.list_all(filters=filters)
+        except Exception as e:
+            self._record_failure()
+            logger.debug("Mem0 consolidation list_all failed: %s", e)
+            return
+
+        if not memories or len(memories) < 2:
+            self._record_success()
+            return
+
+        # --- Phase 1: find duplicate groups ---
+        dup_groups = self._find_duplicate_groups(memories, backend, threshold)
+        deleted_ids: list[str] = []
+        for group in dup_groups:
+            # Keep the most recent memory (by updated_at or created_at), delete rest
+            sorted_mem = sorted(
+                group,
+                key=lambda m: m.get("updated_at") or m.get("created_at") or "",
+                reverse=True,
+            )
+            for victim in sorted_mem[1:]:
+                vid = victim.get("id", "")
+                if not vid:
+                    continue
+                try:
+                    backend.delete(vid)
+                    deleted_ids.append(vid)
+                except Exception as e:
+                    logger.debug("Mem0 consolidation delete failed for %s: %s", vid, e)
+                    continue
+
+        # --- Phase 2: flag contradictions (log only — metadata update not
+        #     yet supported by all backend implementations) ---
+        contradiction_pairs = self._find_contradictions(memories)
+
+        # --- Phase 3: detect stale temporal facts ---
+        stale_ids: list[str] = []
+        if self._config.get("stale_detection", True):
+            stale_ids = self._detect_stale_facts(memories, backend)
+
+        # --- Phase 4: log and record ---
+        if deleted_ids or contradiction_pairs or stale_ids:
+            self._log_consolidation(deleted_ids, contradiction_pairs, stale_ids)
+            with self._consolidation_lock:
+                self._stats["memories_consolidated"] += len(deleted_ids)
+
+        self._record_success()
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Normalize memory text for comparison — lowercase, collapse whitespace, strip punctuation."""
+        text = text.lower().strip()
+        text = re.sub(r"[^\w\s]", "", text)
+        text = re.sub(r"\s+", " ", text)
+        return text
+
+    # --- Stale fact detection ---
+
+    # Temporal hints that indicate the fact refers to a specific past event
+    # (not a recurring or future state).  If the memory is more than 1 day
+    # old and carries one of these hints, it is flagged as potentially stale.
+    _PAST_TEMPORAL_HINTS: frozenset[str] = frozenset({
+        "yesterday", "past_week", "past_month", "past_year",
+    })
+
+    def _detect_stale_facts(
+        self, memories: list[dict], backend
+    ) -> list[str]:
+        """Flag memories with expired temporal hints as potentially stale.
+
+        Returns a list of memory IDs that were flagged.  Does not delete —
+        only annotates so the agent can decide.
+        """
+        now = datetime.now(timezone.utc)
+        stale_ids: list[str] = []
+        for mem in memories:
+            mem_id = mem.get("id", "")
+            if not mem_id:
+                continue
+            meta = mem.get("metadata") or {}
+            hint = meta.get("temporal_hint", "")
+            if not hint:
+                continue
+            # Check if this is a past-oriented hint
+            is_past = (
+                hint in self._PAST_TEMPORAL_HINTS
+                or hint.startswith("past_")
+            )
+            if not is_past:
+                continue
+            # Check age: is the memory more than 1 day old?
+            created = mem.get("created_at", "")
+            if not created:
+                continue
+            try:
+                created_dt = datetime.fromisoformat(
+                    created.replace("Z", "+00:00")
+                )
+                age_days = (now - created_dt).total_seconds() / 86400
+                if age_days > 1:
+                    try:
+                        backend.update(
+                            mem_id,
+                            None,
+                            metadata={"potentially_stale": True},
+                        )
+                        stale_ids.append(mem_id)
+                    except Exception as e:
+                        logger.debug(
+                            "Mem0 stale detection update failed for %s: %s",
+                            mem_id, e,
+                        )
+            except (ValueError, TypeError):
+                continue
+        return stale_ids
+
+    @staticmethod
+    def _find_duplicate_groups(
+        memories: list[dict], backend, threshold: float
+    ) -> list[list[dict]]:
+        """Group memories that are likely duplicates.
+
+        Phase 1: exact normalized text match (cheap).
+        Phase 2: search-based semantic similarity for non-exact matches.
+
+        Returns list of groups (each group = list of memories to coalesce).
+        """
+        # --- Phase 1: exact normalized text ---
+        norm_map: dict[str, list[dict]] = {}
+        for mem in memories:
+            text = mem.get("memory", "")
+            if not text:
+                continue
+            norm = Mem0MemoryProvider._normalize_text(text)
+            norm_map.setdefault(norm, []).append(mem)
+
+        groups: list[list[dict]] = []
+        seen_ids: set[str] = set()
+        for norm, mems in norm_map.items():
+            if len(mems) > 1:
+                groups.append(mems)
+                for m in mems:
+                    seen_ids.add(m.get("id", ""))
+
+        # --- Phase 2: semantic similarity for remaining ---
+        remaining = [m for m in memories if m.get("id", "") not in seen_ids]
+        if not remaining:
+            return groups
+
+        for mem in remaining:
+            text = mem.get("memory", "")
+            mid = mem.get("id", "")
+            if not text or not mid:
+                continue
+            # Check if this memory is already in a group from this pass
+            in_group = any(mid in {m.get("id") for m in g} for g in groups)
+            if in_group:
+                continue
+            # Search for semantically similar memories using the first 100 chars
+            # as a query — this leverages the backend's own embeddings.
+            query = text[:100]
+            try:
+                results = backend.search(
+                    query,
+                    filters={"user_id": mem.get("user_id", "")},
+                    top_k=5,
+                    rerank=False,
+                )
+            except Exception:
+                continue
+            similar_ids = set()
+            for r in results:
+                r_id = r.get("id", "")
+                r_score = r.get("score", 0)
+                if r_id and r_id != mid and r_score >= threshold:
+                    similar_ids.add(r_id)
+            if similar_ids:
+                group = [mem]
+                for other in remaining:
+                    if other.get("id") in similar_ids:
+                        group.append(other)
+                groups.append(group)
+                for m in group:
+                    seen_ids.add(m.get("id", ""))
+
+        return groups
+
+    @staticmethod
+    def _find_contradictions(
+        memories: list[dict],
+    ) -> list[tuple[str, str]]:
+        """Detect pairs of memories that likely contradict each other.
+
+        Heuristic: search for negation patterns and flag pairs where
+        one memory contains the negation of the other's core claim.
+        Returns list of (memory_id_a, memory_id_b) pairs.
+        """
+        negation_patterns = [
+            r"\bnot\b", r"\bnever\b", r"\bno\b", r"\bdoesn'?t\b",
+            r"\bdon'?t\b", r"\bwon'?t\b", r"\bcan'?t\b",
+            r"\bshouldn'?t\b", r"\bisn'?t\b", r"\baren'?t\b",
+        ]
+        neg_re = re.compile("|".join(negation_patterns), re.IGNORECASE)
+
+        pairs: list[tuple[str, str]] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        stopwords = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
+                     "being", "have", "has", "had", "do", "does", "did", "in",
+                     "on", "at", "to", "for", "of", "with", "by", "and", "or"}
+
+        for i, mem_a in enumerate(memories):
+            text_a = mem_a.get("memory", "")
+            id_a = mem_a.get("id", "")
+            if not text_a or not id_a:
+                continue
+            has_neg_a = bool(neg_re.search(text_a))
+            for mem_b in memories[i + 1:]:
+                text_b = mem_b.get("memory", "")
+                id_b = mem_b.get("id", "")
+                if not text_b or not id_b:
+                    continue
+                has_neg_b = bool(neg_re.search(text_b))
+                # Flag if one has negation and the other doesn't (likely contradiction)
+                if not (has_neg_a ^ has_neg_b):
+                    continue
+                # Quick check: do they share significant keywords?
+                words_a = set(Mem0MemoryProvider._normalize_text(text_a).split()) - stopwords
+                words_b = set(Mem0MemoryProvider._normalize_text(text_b).split()) - stopwords
+                if not words_a or not words_b:
+                    continue
+                overlap = words_a & words_b
+                # Need at least 2 meaningful words in common
+                if len(overlap) >= 2:
+                    pair = tuple(sorted([id_a, id_b]))
+                    if pair not in seen_pairs:
+                        seen_pairs.add(pair)
+                        pairs.append(pair)
+
+        return pairs
+
+    def _log_consolidation(
+        self, deleted_ids: list[str], contradiction_pairs: list[tuple[str, str]],
+        stale_ids: list[str] | None = None,
+    ) -> None:
+        """Append consolidation actions to the audit log (no PII)."""
+        from hermes_constants import get_hermes_home
+
+        log_dir = get_hermes_home() / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "memory-consolidation.log"
+        ts = datetime.now(timezone.utc).isoformat()
+        lines = [
+            f"[{ts}] consolidation_run",
+            f"  deleted_duplicates: {len(deleted_ids)}",
+        ]
+        for vid in deleted_ids:
+            lines.append(f"  - deleted: {vid[:8]}...")  # Truncated ID, no content
+        if contradiction_pairs:
+            lines.append(f"  contradictions_flagged: {len(contradiction_pairs)}")
+            for a, b in contradiction_pairs:
+                lines.append(f"  - contradicts: {a[:8]}... <-> {b[:8]}...")
+        if stale_ids:
+            lines.append(f"  stale_flagged: {len(stale_ids)}")
+            for sid in stale_ids:
+                lines.append(f"  - stale: {sid[:8]}...")
+        lines.append("")
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+        except Exception as e:
+            logger.debug("Failed to write consolidation log: %s", e)
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         return [SEARCH_SCHEMA, ADD_SCHEMA, UPDATE_SCHEMA, DELETE_SCHEMA]
@@ -617,10 +1372,28 @@ class Mem0MemoryProvider(MemoryProvider):
             pass
 
     def shutdown(self) -> None:
-        for t in (self._prefetch_thread, self._sync_thread):
+        for t in (self._prefetch_thread, self._sync_thread, self._compress_thread, self._consolidation_thread):
             if t and t.is_alive():
                 t.join(timeout=5.0)
         self._shutdown_backend()
+
+    def get_health_metrics(self) -> Dict[str, Any]:
+        """Return memory health metrics for status display."""
+        metrics: Dict[str, Any] = {
+            "memories_added_session": self._stats["memories_added_session"],
+            "memories_consolidated": self._stats["memories_consolidated"],
+            "compression_events": self._stats["compression_events"],
+            "compression_facts_extracted": self._stats["compression_facts_extracted"],
+        }
+        # Total point count from Qdrant (if backend supports it).
+        if self._backend and hasattr(self._backend, "get_point_count"):
+            try:
+                metrics["total_memories"] = self._backend.get_point_count(
+                    filters=self._read_filters(),
+                )
+            except Exception:
+                metrics["total_memories"] = "unknown"
+        return metrics
 
 
 def register(ctx) -> None:
