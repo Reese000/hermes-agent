@@ -7766,6 +7766,16 @@ def _apply_model_assignment_sync(
         aux[slot] = slot_cfg
 
     cfg["auxiliary"] = aux
+
+    # Sync auxiliary.subagent → delegation (delegate_task reads delegation.*)
+    if "subagent" in targets:
+        delegation = cfg.get("delegation")
+        if not isinstance(delegation, dict):
+            delegation = {}
+        delegation["model"] = model
+        delegation["provider"] = provider
+        cfg["delegation"] = delegation
+
     save_config(cfg)
     return {
         "ok": True,
