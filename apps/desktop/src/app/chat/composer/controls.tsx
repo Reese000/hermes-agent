@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { useMemo, useState } from 'react'
 
+import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from '@/app/shell/model-catalog-menu'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Codicon } from '@/components/ui/codicon'
@@ -44,7 +45,7 @@ import {
   VolumeX
 } from '@/lib/icons'
 import { displayModelName } from '@/lib/model-status-label'
-import { reasoningEffortLabel, type ReasoningEffort } from '@/lib/reasoning-effort'
+import { type ReasoningEffort, reasoningEffortLabel } from '@/lib/reasoning-effort'
 import { cn } from '@/lib/utils'
 import {
   $enhanceEnabled,
@@ -56,7 +57,6 @@ import {
 } from '@/store/enhance-settings'
 import { $wakeWord, toggleWakeWord } from '@/store/wake-word'
 
-import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from '@/app/shell/model-catalog-menu'
 import type { ConversationStatus } from './hooks/use-voice-conversation'
 import { ModelPill } from './model-pill'
 import type { ChatBarState, VoiceStatus } from './types'
@@ -139,26 +139,29 @@ export function ComposerControls({
   // per-row reasoning/fast edits via hover submenus. `applyPreset` and
   // `presetFor` are no-ops because enhance doesn't persist per-model presets
   // — it stores a single global reasoning level in $enhanceReasoning.
-  const enhanceController: ModelMenuController = useMemo(() => ({
-    applyPreset: () => {},
-    current: {
-      effort: enhanceReasoning,
-      fast: false,
-      model: enhanceModel,
-      provider: enhanceProvider,
-    },
-    presetFor: () => ({ effort: enhanceReasoning }),
-    select: (model: string, provider: string) => {
-      $enhanceModel.set(model)
-      $enhanceProvider.set(provider)
-      setModelMenuOpen(false)
-    },
-    setOptions: (patch) => {
-      if (patch.effort !== undefined) {
-        $enhanceReasoning.set(patch.effort as ReasoningEffort)
+  const enhanceController: ModelMenuController = useMemo(
+    () => ({
+      applyPreset: () => {},
+      current: {
+        effort: enhanceReasoning,
+        fast: false,
+        model: enhanceModel,
+        provider: enhanceProvider
+      },
+      presetFor: () => ({ effort: enhanceReasoning }),
+      select: (model: string, provider: string) => {
+        $enhanceModel.set(model)
+        $enhanceProvider.set(provider)
+        setModelMenuOpen(false)
+      },
+      setOptions: patch => {
+        if (patch.effort !== undefined) {
+          $enhanceReasoning.set(patch.effort as ReasoningEffort)
+        }
       }
-    },
-  }), [enhanceModel, enhanceProvider, enhanceReasoning])
+    }),
+    [enhanceModel, enhanceProvider, enhanceReasoning]
+  )
 
   if (conversation.active) {
     return <ConversationPill {...conversation} disabled={disabled} />
@@ -180,12 +183,20 @@ export function ComposerControls({
                   `[&>*]:!inline-flex` rule which otherwise collapses both
                   spans onto one line. The hint line uses 9px italic faded
                   text to visually de-emphasize it. ──────────────────────── */}
-              <Tip label={enhancing ? c.enhancing : (
-                <>
-                  <span className="!block">{c.enhance} — {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
-                  <span className="!block text-[9px] italic opacity-50">right-click to configure</span>
-                </>
-              )}>
+              <Tip
+                label={
+                  enhancing ? (
+                    c.enhancing
+                  ) : (
+                    <>
+                      <span className="!block">
+                        {c.enhance} — {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}
+                      </span>
+                      <span className="!block text-[9px] italic opacity-50">right-click to configure</span>
+                    </>
+                  )
+                }
+              >
                 <Button
                   aria-label={enhancing ? c.enhancing : c.enhance}
                   className={cn(GHOST_ICON_BTN, 'p-0')}
@@ -202,13 +213,13 @@ export function ComposerControls({
           </ContextMenuTrigger>
           <ContextMenuContent className="w-64">
             <ContextMenuItem onSelect={() => $enhanceEnabled.set(false)}>
-              <Codicon name="eye-closed" size="0.875rem" className="mr-2" />
+              <Codicon className="mr-2" name="eye-closed" size="0.875rem" />
               Hide enhance button
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuSub>
               <ContextMenuSubTrigger>
-                <Codicon name="list-filter" size="0.875rem" className="mr-2" />
+                <Codicon className="mr-2" name="list-filter" size="0.875rem" />
                 Profile: {ENHANCE_PROFILES[enhanceProfile]?.label || enhanceProfile}
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="w-48">
@@ -229,13 +240,10 @@ export function ComposerControls({
                 model pill dropdown. `onSelect` handles click as fallback.
                 The DropdownMenu's sr-only trigger anchors the dropdown
                 near this row (side="top" align="start"). ──────────────── */}
-            <ContextMenuItem
-              onSelect={() => setModelMenuOpen(true)}
-              onPointerEnter={() => setModelMenuOpen(true)}
-            >
-              <Codicon name="settings-gear" size="0.875rem" className="mr-2" />
+            <ContextMenuItem onPointerEnter={() => setModelMenuOpen(true)} onSelect={() => setModelMenuOpen(true)}>
+              <Codicon className="mr-2" name="settings-gear" size="0.875rem" />
               <span className="min-w-0 flex-1 truncate">Model: {displayModelName(enhanceModel)}</span>
-              <Codicon name="chevron-right" size="0.75rem" className="ml-auto opacity-50" />
+              <Codicon className="ml-auto opacity-50" name="chevron-right" size="0.75rem" />
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
@@ -259,7 +267,7 @@ export function ComposerControls({
 
           ModelMenuCloseContext lets ModelCatalogMenu's internal close
           calls (on model select, keyboard Enter) dismiss this dropdown. */}
-      <DropdownMenu open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
+      <DropdownMenu onOpenChange={setModelMenuOpen} open={modelMenuOpen}>
         {/* Hidden trigger — Radix needs a DOM element to anchor the dropdown
             to. Visually hidden so only the context menu "Model:" row opens it. */}
         <DropdownMenuTrigger asChild>
@@ -267,10 +275,7 @@ export function ComposerControls({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64 p-0" side="top" sideOffset={8}>
           <ModelMenuCloseContext.Provider value={() => setModelMenuOpen(false)}>
-            <ModelCatalogMenu
-              controller={enhanceController}
-              includeMoa={false}
-            />
+            <ModelCatalogMenu controller={enhanceController} includeMoa={false} />
           </ModelMenuCloseContext.Provider>
         </DropdownMenuContent>
       </DropdownMenu>

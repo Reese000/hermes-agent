@@ -31,9 +31,8 @@ import {
   collapseModelFamilies,
   DEFAULT_VISIBLE_PER_PROVIDER,
   effectiveVisibleKeys,
-  emptyProviderSentinelKey,
-  type ModelFamily,
   isProviderSentinel,
+  type ModelFamily,
   modelVisibilityKey,
   setModelVisibilityOpen,
   setVisibleModels,
@@ -183,10 +182,7 @@ export function ModelCatalogMenu({
     }
   }, [liveResults, liveLoading, liveError])
 
-  const hasOpenRouter = useMemo(
-    () => providers?.some(p => p.slug.toLowerCase() === 'openrouter') ?? false,
-    [providers]
-  )
+  const hasOpenRouter = useMemo(() => providers?.some(p => p.slug.toLowerCase() === 'openrouter') ?? false, [providers])
 
   useEffect(() => {
     if (!hasOpenRouter || !search.trim()) {
@@ -205,9 +201,7 @@ export function ModelCatalogMenu({
       searchProviderModels('openrouter', search)
         .then(result => {
           if (!cancelled) {
-            const staticModels = new Set(
-              providers?.flatMap(p => (p.models ?? []).map(m => m.toLowerCase())) ?? []
-            )
+            const staticModels = new Set(providers?.flatMap(p => (p.models ?? []).map(m => m.toLowerCase())) ?? [])
 
             setLiveResults(result.models.filter(m => !staticModels.has(m.toLowerCase())))
           }
@@ -570,7 +564,12 @@ export function ModelCatalogMenu({
           ) : liveLoading ? (
             <DropdownMenuGroup className="py-1">
               {Array.from({ length: 3 }, (_, index) => (
-                <DropdownMenuItem className={dropdownMenuRow} disabled key={`live-skeleton-${index}`} onSelect={e => e.preventDefault()}>
+                <DropdownMenuItem
+                  className={dropdownMenuRow}
+                  disabled
+                  key={`live-skeleton-${index}`}
+                  onSelect={e => e.preventDefault()}
+                >
                   <Skeleton className="h-4 w-full" />
                 </DropdownMenuItem>
               ))}
@@ -588,12 +587,14 @@ export function ModelCatalogMenu({
                 const preset = controller.presetFor('openrouter', model)
                 const effEffort = preset.effort ?? ''
                 const effFast = preset.fast ?? false
+
                 const fastControl: FastControl = resolveFastControl(
                   model,
                   orProvider?.models ?? [],
                   orProvider?.capabilities?.[model]?.fast ?? false,
                   effFast
                 )
+
                 const meta = [
                   fastControl.kind !== 'none' && fastControl.on ? copy.fast : null,
                   reasoningEffortLabel(effEffort || defaultEffort)
@@ -604,21 +605,21 @@ export function ModelCatalogMenu({
                 return (
                   <DropdownMenuSub key={`live:${model}`}>
                     <DropdownMenuSubTrigger
+                      className={cn(dropdownMenuRow, 'font-mono')}
                       hideChevron
                       onClick={() => {
                         // Persist the live search model to the visible set so it
                         // appears in the default (unfiltered) catalog next time.
-                        setVisibleModels(
-                          toggleModelVisibility(visibleModels, pickerProviders, 'openrouter', model)
-                        )
+                        setVisibleModels(toggleModelVisibility(visibleModels, pickerProviders, 'openrouter', model))
                         void controller.select(model, 'openrouter')
                         // Save and apply the preset so effort/fast carry to other
                         // chats — mirrors what selectFamily does for curated models.
                         controller.applyPreset(
                           {
-                            effort: (orProvider?.capabilities?.[model]?.reasoning ?? true)
-                              ? (preset.effort || defaultEffort)
-                              : undefined,
+                            effort:
+                              (orProvider?.capabilities?.[model]?.reasoning ?? true)
+                                ? preset.effort || defaultEffort
+                                : undefined,
                             fast: fastControl.kind !== 'none' ? (preset.fast ?? false) : undefined
                           },
                           { model, provider: 'openrouter' }
@@ -627,15 +628,14 @@ export function ModelCatalogMenu({
                       }}
                       onKeyDown={event => {
                         if (event.key === 'Enter' || event.key === ' ') {
-                          setVisibleModels(
-                            toggleModelVisibility(visibleModels, pickerProviders, 'openrouter', model)
-                          )
+                          setVisibleModels(toggleModelVisibility(visibleModels, pickerProviders, 'openrouter', model))
                           void controller.select(model, 'openrouter')
                           controller.applyPreset(
                             {
-                              effort: (orProvider?.capabilities?.[model]?.reasoning ?? true)
-                                ? (preset.effort || defaultEffort)
-                                : undefined,
+                              effort:
+                                (orProvider?.capabilities?.[model]?.reasoning ?? true)
+                                  ? preset.effort || defaultEffort
+                                  : undefined,
                               fast: fastControl.kind !== 'none' ? (preset.fast ?? false) : undefined
                             },
                             { model, provider: 'openrouter' }
@@ -643,7 +643,6 @@ export function ModelCatalogMenu({
                           closeMenu()
                         }
                       }}
-                      className={cn(dropdownMenuRow, 'font-mono')}
                     >
                       <span className="min-w-0 flex-1 truncate">
                         <HighlightMatches query={search} text={model} />
@@ -744,10 +743,12 @@ function groupModels(
     if (visible) {
       const providerPrefix = `${provider.slug}::`
       const curatedIds = new Set(allFamilies.flatMap(f => [f.id, f.fastId].filter(Boolean)))
+
       const extraFromVisible = [...visible]
         .filter(key => key.startsWith(providerPrefix) && !isProviderSentinel(key))
         .map(key => key.slice(providerPrefix.length))
         .filter(model => !curatedIds.has(model))
+
       for (const model of extraFromVisible) {
         allFamilies.push({ id: model, fastId: null })
       }

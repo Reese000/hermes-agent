@@ -79,11 +79,7 @@ export function UsageIndicator({ busy, sessionId }: UsageIndicatorProps) {
       ? rawRate
       : null
 
-  const hasData =
-    data &&
-    (data.input_tokens > 0 ||
-      data.output_tokens > 0 ||
-      data.estimated_cost_usd > 0)
+  const hasData = data && (data.input_tokens > 0 || data.output_tokens > 0 || data.estimated_cost_usd > 0)
 
   // Auto-hide when no usage data
   if (!hasData) {
@@ -95,14 +91,11 @@ export function UsageIndicator({ busy, sessionId }: UsageIndicatorProps) {
   // Guard against NaN/Infinity/negative values
   let cost = d.estimated_cost_usd
 
-  if (!isFinite(cost) || cost < 0) { cost = 0 }
+  if (!isFinite(cost) || cost < 0) {
+    cost = 0
+  }
 
-  const formattedCost =
-    cost >= 0.01
-      ? `$${cost.toFixed(2)}`
-      : cost > 0
-        ? `$${cost.toFixed(4)}`
-        : '$0'
+  const formattedCost = cost >= 0.01 ? `$${cost.toFixed(2)}` : cost > 0 ? `$${cost.toFixed(4)}` : '$0'
 
   // Cache hit rate — tooltip detail only now (see the row list below). It's
   // a meaningful "is my context getting reused" signal but not a pace
@@ -203,18 +196,13 @@ export function UsageIndicator({ busy, sessionId }: UsageIndicatorProps) {
         <div className="contents">{indicator}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onSelect={() => $usageIndicatorEnabled.set(false)}>
-          Hide usage indicator
-        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => $usageIndicatorEnabled.set(false)}>Hide usage indicator</ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuSub>
           <ContextMenuSubTrigger>Refresh interval</ContextMenuSubTrigger>
           <ContextMenuSubContent className="w-32">
             {USAGE_INTERVAL_OPTIONS.map(ms => (
-              <ContextMenuItem
-                key={ms}
-                onSelect={() => $usageIntervalMs.set(ms)}
-              >
+              <ContextMenuItem key={ms} onSelect={() => $usageIntervalMs.set(ms)}>
                 <span className={cn('mr-2', ms === intervalMs && 'font-bold')}>
                   {ms === intervalMs ? '✓' : '\u2003'}
                 </span>

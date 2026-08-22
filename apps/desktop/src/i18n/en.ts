@@ -966,7 +966,7 @@ export const en: Translations = {
         mcp: { label: 'MCP', hint: 'MCP tool routing' },
         title_generation: { label: 'Title gen', hint: 'Session titles' },
         curator: { label: 'Curator', hint: 'Skill-usage review' },
-        subagent: { label: "Subagent (delegate_task)", hint: "Model for child agents" },
+        subagent: { label: 'Subagent (delegate_task)', hint: 'Model for child agents' },
         prompt_enhance: { label: 'Prompt Enhance', hint: 'Rewrite user prompts' }
       }
     },

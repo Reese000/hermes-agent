@@ -1811,9 +1811,11 @@ export async function* enhancePromptStream(
     console.log('[enhance] apiStream not available, falling back to non-streaming')
     // Fallback to non-streaming if the preload bridge doesn't have apiStream
     const res = await enhancePrompt(text, sessionId, profile, signal)
+
     if (res.ok && res.enhanced) {
       yield res.enhanced
     }
+
     return
   }
 
@@ -1835,20 +1837,26 @@ export async function* enhancePromptStream(
     {
       onChunk: (payload: { data: string }) => {
         console.log('[enhance] chunk:', payload.data?.substring(0, 80))
+
         if (payload.data === '[DONE]') {
           done = true
           donePayload = { ok: true }
           resolve?.()
+
           return
         }
+
         try {
           const parsed = JSON.parse(payload.data)
+
           if (parsed.error) {
             done = true
             donePayload = { ok: false, error: parsed.error }
             resolve?.()
+
             return
           }
+
           if (parsed.text) {
             chunks.push(parsed.text)
             resolve?.()
@@ -1871,6 +1879,7 @@ export async function* enhancePromptStream(
     donePayload = { ok: false, error: 'aborted' }
     resolve?.()
   }
+
   signal?.addEventListener('abort', abortHandler)
 
   let chunkIndex = 0

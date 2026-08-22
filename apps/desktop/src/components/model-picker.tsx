@@ -96,9 +96,7 @@ export function ModelPickerDialog({
       searchProviderModels('openrouter', search)
         .then(result => {
           if (!cancelled) {
-            const staticModels = new Set(
-              providers.flatMap(p => (p.models ?? []).map(m => m.toLowerCase()))
-            )
+            const staticModels = new Set(providers.flatMap(p => (p.models ?? []).map(m => m.toLowerCase())))
 
             setLiveResults(result.models.filter(m => !staticModels.has(m.toLowerCase())))
           }
@@ -109,7 +107,11 @@ export function ModelPickerDialog({
             setLiveError(err instanceof Error ? err.message : 'Live search failed')
           }
         })
-        .finally(() => { if (!cancelled) {setLiveLoading(false)} })
+        .finally(() => {
+          if (!cancelled) {
+            setLiveLoading(false)
+          }
+        })
     }, 300)
 
     return () => {
@@ -309,53 +311,58 @@ function ModelResults({
           </CommandGroup>
         )
       })}
-      {(liveResults.length > 0 || liveLoading || liveError || (search.trim() && !liveLoading && !liveError)) && providers.some(p => p.slug === 'openrouter') && (
-        <>
-          {liveError && !liveLoading && (
-            <div className="px-3 py-2">
-              <InlineNotice kind="error" title="Live search failed">
-                {liveError}
-              </InlineNotice>
-            </div>
-          )}
-          {!liveLoading && !liveError && liveResults.length === 0 && search.trim() && (
-            <div className="px-4 py-3 text-sm text-muted-foreground">No live results for "{search}".</div>
-          )}
-          {liveResults.length > 0 && (
-        <CommandGroup heading={
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate">Live Search</span>
-            <span className="font-mono text-xs font-normal normal-case tracking-normal text-muted-foreground">
-              openrouter &middot; {liveResults.length} results
-            </span>
-          </span>
-        }>
-          {liveResults.map(model => {
-            const orProvider = providers.find(p => p.slug === 'openrouter')
-            const price = orProvider?.pricing?.[model]
-
-            return (
-              <CommandItem
-                className="flex items-center gap-2 pl-6 font-mono"
-                key={`live:${model}`}
-                onSelect={() => {
-                  const or = providers.find(p => p.slug === 'openrouter')
-
-                  if (or) {onSelectModel(or, model)}
-                }}
-                value={model}
+      {(liveResults.length > 0 || liveLoading || liveError || (search.trim() && !liveLoading && !liveError)) &&
+        providers.some(p => p.slug === 'openrouter') && (
+          <>
+            {liveError && !liveLoading && (
+              <div className="px-3 py-2">
+                <InlineNotice kind="error" title="Live search failed">
+                  {liveError}
+                </InlineNotice>
+              </div>
+            )}
+            {!liveLoading && !liveError && liveResults.length === 0 && search.trim() && (
+              <div className="px-4 py-3 text-sm text-muted-foreground">No live results for "{search}".</div>
+            )}
+            {liveResults.length > 0 && (
+              <CommandGroup
+                heading={
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">Live Search</span>
+                    <span className="font-mono text-xs font-normal normal-case tracking-normal text-muted-foreground">
+                      openrouter &middot; {liveResults.length} results
+                    </span>
+                  </span>
+                }
               >
-                <span className="min-w-0 flex-1 truncate">
-                  <HighlightMatches query={search} text={model} />
-                </span>
-                <ModelPrice isCurrent={false} price={price} />
-              </CommandItem>
-            )
-          })}
-        </CommandGroup>
-          )}
-        </>
-      )}
+                {liveResults.map(model => {
+                  const orProvider = providers.find(p => p.slug === 'openrouter')
+                  const price = orProvider?.pricing?.[model]
+
+                  return (
+                    <CommandItem
+                      className="flex items-center gap-2 pl-6 font-mono"
+                      key={`live:${model}`}
+                      onSelect={() => {
+                        const or = providers.find(p => p.slug === 'openrouter')
+
+                        if (or) {
+                          onSelectModel(or, model)
+                        }
+                      }}
+                      value={model}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        <HighlightMatches query={search} text={model} />
+                      </span>
+                      <ModelPrice isCurrent={false} price={price} />
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
+            )}
+          </>
+        )}
       {liveLoading && liveResults.length === 0 && search.trim() && (
         <CommandGroup heading={<Skeleton className="h-3 w-32" />}>
           {Array.from({ length: 3 }, (_, i) => (
@@ -417,10 +424,7 @@ function ModelPrice({ price, isCurrent }: { price?: ModelPricing; isCurrent: boo
       </span>
       {price.cache ? (
         <span
-          className={cn(
-            'text-[0.6rem]',
-            isCurrent ? 'text-primary-foreground/50' : 'text-muted-foreground/70'
-          )}
+          className={cn('text-[0.6rem]', isCurrent ? 'text-primary-foreground/50' : 'text-muted-foreground/70')}
           title={`Cache: ${price.cache}`}
         >
           {price.cache}

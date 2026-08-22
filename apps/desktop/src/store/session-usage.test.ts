@@ -184,13 +184,19 @@ describe('getSmoothedRate', () => {
     vi.setSystemTime(0)
     setSessionUsage('rate-blend', mockUsageResponse({ estimated_cost_usd: 0.01, input_tokens: 0, output_tokens: 1000 }))
     vi.setSystemTime(15_000)
-    setSessionUsage('rate-blend', mockUsageResponse({ estimated_cost_usd: 0.013, input_tokens: 0, output_tokens: 1150 }))
+    setSessionUsage(
+      'rate-blend',
+      mockUsageResponse({ estimated_cost_usd: 0.013, input_tokens: 0, output_tokens: 1150 })
+    )
     const first = getSmoothedRate('rate-blend')!
 
     // Pace doubles: 300 output tokens in the next 15s (20 tok/s window) vs the
     // first window's 10 tok/s.
     vi.setSystemTime(30_000)
-    setSessionUsage('rate-blend', mockUsageResponse({ estimated_cost_usd: 0.019, input_tokens: 0, output_tokens: 1450 }))
+    setSessionUsage(
+      'rate-blend',
+      mockUsageResponse({ estimated_cost_usd: 0.019, input_tokens: 0, output_tokens: 1450 })
+    )
     const second = getSmoothedRate('rate-blend')!
 
     expect(second.tokensPerSecond).toBeGreaterThan(first.tokensPerSecond)
@@ -220,9 +226,15 @@ describe('getSmoothedRate', () => {
   it('still computes normally for a gap just under the trust ceiling', () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
-    setSessionUsage('rate-gap-ok', mockUsageResponse({ estimated_cost_usd: 0.01, input_tokens: 0, output_tokens: 1000 }))
+    setSessionUsage(
+      'rate-gap-ok',
+      mockUsageResponse({ estimated_cost_usd: 0.01, input_tokens: 0, output_tokens: 1000 })
+    )
     vi.setSystemTime(59_000)
-    setSessionUsage('rate-gap-ok', mockUsageResponse({ estimated_cost_usd: 0.013, input_tokens: 0, output_tokens: 1150 }))
+    setSessionUsage(
+      'rate-gap-ok',
+      mockUsageResponse({ estimated_cost_usd: 0.013, input_tokens: 0, output_tokens: 1150 })
+    )
 
     expect(getSmoothedRate('rate-gap-ok')).not.toBeNull()
   })
@@ -230,9 +242,15 @@ describe('getSmoothedRate', () => {
   it('clears instead of computing for a gap just over the trust ceiling', () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
-    setSessionUsage('rate-gap-bad', mockUsageResponse({ estimated_cost_usd: 0.01, input_tokens: 0, output_tokens: 1000 }))
+    setSessionUsage(
+      'rate-gap-bad',
+      mockUsageResponse({ estimated_cost_usd: 0.01, input_tokens: 0, output_tokens: 1000 })
+    )
     vi.setSystemTime(61_000)
-    setSessionUsage('rate-gap-bad', mockUsageResponse({ estimated_cost_usd: 0.013, input_tokens: 0, output_tokens: 1150 }))
+    setSessionUsage(
+      'rate-gap-bad',
+      mockUsageResponse({ estimated_cost_usd: 0.013, input_tokens: 0, output_tokens: 1150 })
+    )
 
     expect(getSmoothedRate('rate-gap-bad')).toBeNull()
   })
@@ -309,15 +327,24 @@ describe('getSmoothedRate', () => {
   it('drops a sample where cumulative totals decreased instead of corrupting the rate', () => {
     vi.useFakeTimers()
     vi.setSystemTime(0)
-    setSessionUsage('rate-regress', mockUsageResponse({ estimated_cost_usd: 0.01, input_tokens: 0, output_tokens: 1000 }))
+    setSessionUsage(
+      'rate-regress',
+      mockUsageResponse({ estimated_cost_usd: 0.01, input_tokens: 0, output_tokens: 1000 })
+    )
     vi.setSystemTime(15_000)
-    setSessionUsage('rate-regress', mockUsageResponse({ estimated_cost_usd: 0.013, input_tokens: 0, output_tokens: 1150 }))
+    setSessionUsage(
+      'rate-regress',
+      mockUsageResponse({ estimated_cost_usd: 0.013, input_tokens: 0, output_tokens: 1150 })
+    )
     const established = getSmoothedRate('rate-regress')
 
     // A stale/racing response reporting fewer cumulative tokens than we've
     // already observed — must not read as a negative rate.
     vi.setSystemTime(30_000)
-    setSessionUsage('rate-regress', mockUsageResponse({ estimated_cost_usd: 0.012, input_tokens: 0, output_tokens: 1100 }))
+    setSessionUsage(
+      'rate-regress',
+      mockUsageResponse({ estimated_cost_usd: 0.012, input_tokens: 0, output_tokens: 1100 })
+    )
 
     expect(getSmoothedRate('rate-regress')).toEqual(established)
   })

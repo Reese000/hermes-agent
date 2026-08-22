@@ -96,13 +96,17 @@ function updateSmoothedRate(sessionId: string, data: SessionUsageResponse): void
   // turns the sum above into NaN) must never reach the baseline or the
   // displayed rate — one bad poll would otherwise corrupt every blended
   // sample after it until the session is cleared.
-  if (!Number.isFinite(tokens) || !Number.isFinite(cost)) {return}
+  if (!Number.isFinite(tokens) || !Number.isFinite(cost)) {
+    return
+  }
 
   const prev = lastSampleBySession.get(sessionId)
 
   lastSampleBySession.set(sessionId, { t: now, tokens, cost })
 
-  if (!prev) {return}
+  if (!prev) {
+    return
+  }
 
   const dt = (now - prev.t) / 1000
 
@@ -131,7 +135,9 @@ function updateSmoothedRate(sessionId: string, data: SessionUsageResponse): void
   // Cumulative counters never shrink and two polls never land on the same
   // millisecond — either means a stale/racing response. Drop the sample;
   // the baseline above already advanced, so the next real poll recovers.
-  if (dt < 1 || dTokens < 0 || dCost < 0) {return}
+  if (dt < 1 || dTokens < 0 || dCost < 0) {
+    return
+  }
 
   const windowTps = dTokens / dt
   const windowCostPerHour = (dCost / dt) * 3600
@@ -141,7 +147,7 @@ function updateSmoothedRate(sessionId: string, data: SessionUsageResponse): void
   const nextRate: SmoothedRate = {
     tokensPerSecond: Math.min(
       prevRate ? alpha * windowTps + (1 - alpha) * prevRate.tokensPerSecond : windowTps,
-      200  // cap: no model sustains >200 t/s; spikes above this are measurement noise
+      200 // cap: no model sustains >200 t/s; spikes above this are measurement noise
     ),
     costPerHour: prevRate ? alpha * windowCostPerHour + (1 - alpha) * prevRate.costPerHour : windowCostPerHour
   }
@@ -150,7 +156,9 @@ function updateSmoothedRate(sessionId: string, data: SessionUsageResponse): void
   // actually produce a non-finite result here, but a display-facing number
   // should never be allowed to surface NaN/Infinity even if a future change
   // to this function breaks that invariant.
-  if (!Number.isFinite(nextRate.tokensPerSecond) || !Number.isFinite(nextRate.costPerHour)) {return}
+  if (!Number.isFinite(nextRate.tokensPerSecond) || !Number.isFinite(nextRate.costPerHour)) {
+    return
+  }
 
   $smoothedRateBySession.set({
     ...$smoothedRateBySession.get(),

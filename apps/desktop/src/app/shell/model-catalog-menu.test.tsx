@@ -139,9 +139,12 @@ describe('live OpenRouter search', () => {
 
     // HighlightMatches splits the match into separate text/mark nodes, so
     // match against the full rendered text rather than a single node.
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
+    await vi.waitFor(
+      () => {
+        expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
+      },
+      { timeout: 2000 }
+    )
     expect(searchProviderModels).toHaveBeenCalledWith('openrouter', 'mixtral')
   })
 
@@ -149,7 +152,10 @@ describe('live OpenRouter search', () => {
     let resolveSearch: ((v: { models: string[] }) => void) | undefined
 
     searchProviderModels.mockImplementation(
-      () => new Promise(resolve => { resolveSearch = resolve })
+      () =>
+        new Promise(resolve => {
+          resolveSearch = resolve
+        })
     )
 
     renderMenu()
@@ -165,9 +171,12 @@ describe('live OpenRouter search', () => {
     expect(document.activeElement).toBe(input)
 
     resolveSearch?.({ models: ['mistralai/mixtral-8x22b'] })
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
+    await vi.waitFor(
+      () => {
+        expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
+      },
+      { timeout: 2000 }
+    )
     // Results replacing the skeleton is exactly the DOM mutation that used
     // to yank focus via Radix's roving-focus-group (issue fixed upstream of
     // this test) — assert it stays put.

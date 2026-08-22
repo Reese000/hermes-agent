@@ -80,9 +80,12 @@ describe('live OpenRouter search', () => {
 
     fireEvent.change(input, { target: { value: 'mixtral' } })
 
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
+    await vi.waitFor(
+      () => {
+        expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
+      },
+      { timeout: 2000 }
+    )
     expect(searchProviderModels).toHaveBeenCalledWith('openrouter', 'mixtral')
   })
 
@@ -101,9 +104,12 @@ describe('live OpenRouter search', () => {
 
     fireEvent.change(input, { target: { value: 'claude' } })
 
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
+    await vi.waitFor(
+      () => {
+        expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
+      },
+      { timeout: 2000 }
+    )
 
     // Only the curated occurrence should be present — no second "Live
     // Search" row for the same model under a different case. HighlightMatches

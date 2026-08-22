@@ -120,16 +120,17 @@ describe('SearchableSelect live search', () => {
   it('fetches and shows live results not already in the curated list', async () => {
     searchProviderModels.mockResolvedValue({ models: ['mistralai/mixtral-8x22b'] })
 
-    render(
-      <SearchableSelect liveSearchProvider="openrouter" onChange={vi.fn()} options={options} value="" />
-    )
+    render(<SearchableSelect liveSearchProvider="openrouter" onChange={vi.fn()} options={options} value="" />)
 
     fireEvent.click(screen.getByRole('combobox'))
     fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'mixtral' } })
 
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
+    await vi.waitFor(
+      () => {
+        expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
+      },
+      { timeout: 2000 }
+    )
     expect(searchProviderModels).toHaveBeenCalledWith('openrouter', 'mixtral')
   })
 
@@ -137,9 +138,7 @@ describe('SearchableSelect live search', () => {
     searchProviderModels.mockResolvedValue({ models: ['mistralai/mixtral-8x22b'] })
     const onChange = vi.fn()
 
-    render(
-      <SearchableSelect liveSearchProvider="openrouter" onChange={onChange} options={options} value="" />
-    )
+    render(<SearchableSelect liveSearchProvider="openrouter" onChange={onChange} options={options} value="" />)
 
     fireEvent.click(screen.getByRole('combobox'))
     fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'mixtral' } })
@@ -155,16 +154,17 @@ describe('SearchableSelect live search', () => {
       models: ['Anthropic/Claude-Sonnet-4', 'mistralai/mixtral-8x22b']
     })
 
-    render(
-      <SearchableSelect liveSearchProvider="openrouter" onChange={vi.fn()} options={options} value="" />
-    )
+    render(<SearchableSelect liveSearchProvider="openrouter" onChange={vi.fn()} options={options} value="" />)
 
     fireEvent.click(screen.getByRole('combobox'))
     fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'claude' } })
 
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/claude-sonnet-4/i)
-    }, { timeout: 2000 })
+    await vi.waitFor(
+      () => {
+        expect(document.body.textContent).toMatch(/claude-sonnet-4/i)
+      },
+      { timeout: 2000 }
+    )
 
     // Only the curated occurrence should render — no duplicate "Live Search"
     // entry for the same model under a different case.
@@ -176,9 +176,7 @@ describe('SearchableSelect live search', () => {
   it('surfaces a live-search failure inline without crashing', async () => {
     searchProviderModels.mockRejectedValue(new Error('network down'))
 
-    render(
-      <SearchableSelect liveSearchProvider="openrouter" onChange={vi.fn()} options={options} value="" />
-    )
+    render(<SearchableSelect liveSearchProvider="openrouter" onChange={vi.fn()} options={options} value="" />)
 
     fireEvent.click(screen.getByRole('combobox'))
     fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'mixtral' } })
@@ -198,9 +196,7 @@ describe('SearchableSelect live search', () => {
   })
 
   it('never queries live search for a provider other than openrouter', async () => {
-    render(
-      <SearchableSelect liveSearchProvider="some-other-provider" onChange={vi.fn()} options={options} value="" />
-    )
+    render(<SearchableSelect liveSearchProvider="some-other-provider" onChange={vi.fn()} options={options} value="" />)
 
     fireEvent.click(screen.getByRole('combobox'))
     fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'mixtral' } })

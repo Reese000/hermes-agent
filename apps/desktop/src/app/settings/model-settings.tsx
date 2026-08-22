@@ -758,11 +758,7 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
               <Button onClick={() => setPickerOpen(true)} size="sm" variant="outline">
                 {selectedProvider} &middot; {selectedModel}
               </Button>
-              <Button
-                disabled={applying}
-                onClick={() => void applyMainModel()}
-                size="sm"
-              >
+              <Button disabled={applying} onClick={() => void applyMainModel()} size="sm">
                 {applying && <Loader2 className="size-3.5 animate-spin" />}
                 {applying ? m.applying : t.common.apply}
               </Button>

@@ -13197,38 +13197,44 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
     const parsed = new URL(url)
     const client = parsed.protocol === 'https:' ? https : http
 
-    const req = client.request(parsed, {
-      method: request?.method || 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Hermes-Session-Token': connection.token,
-        ...(body ? { 'Content-Length': String(body.length) } : {})
-      }
-    }, res => {
-      // Stream the response body line by line
-      let buffer = ''
-      res.on('data', chunk => {
-        buffer += chunk.toString('utf8')
-        // Process complete SSE lines
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || '' // Keep incomplete line in buffer
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            event.sender.send('hermes:api-stream:chunk', { data: line.slice(6) })
+    const req = client.request(
+      parsed,
+      {
+        method: request?.method || 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hermes-Session-Token': connection.token,
+          ...(body ? { 'Content-Length': String(body.length) } : {})
+        }
+      },
+      res => {
+        // Stream the response body line by line
+        let buffer = ''
+        res.on('data', chunk => {
+          buffer += chunk.toString('utf8')
+          // Process complete SSE lines
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || '' // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              event.sender.send('hermes:api-stream:chunk', { data: line.slice(6) })
+            }
           }
-        }
-      })
-      res.on('end', () => {
-        // Flush remaining buffer
-        if (buffer.startsWith('data: ')) {
-          event.sender.send('hermes:api-stream:chunk', { data: buffer.slice(6) })
-        }
-        event.sender.send('hermes:api-stream:done', { ok: true })
-      })
-      res.on('error', err => {
-        event.sender.send('hermes:api-stream:done', { ok: false, error: err.message })
-      })
-    })
+        })
+        res.on('end', () => {
+          // Flush remaining buffer
+          if (buffer.startsWith('data: ')) {
+            event.sender.send('hermes:api-stream:chunk', { data: buffer.slice(6) })
+          }
+
+          event.sender.send('hermes:api-stream:done', { ok: true })
+        })
+        res.on('error', err => {
+          event.sender.send('hermes:api-stream:done', { ok: false, error: err.message })
+        })
+      }
+    )
 
     req.on('error', err => {
       event.sender.send('hermes:api-stream:done', { ok: false, error: err.message })
@@ -13241,6 +13247,7 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
     if (body) {
       req.write(body)
     }
+
     req.end()
   } catch (err) {
     event.sender.send('hermes:api-stream:done', {
@@ -13269,38 +13276,44 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
     const parsed = new URL(url)
     const client = parsed.protocol === 'https:' ? https : http
 
-    const req = client.request(parsed, {
-      method: request?.method || 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Hermes-Session-Token': connection.token,
-        ...(body ? { 'Content-Length': String(body.length) } : {})
-      }
-    }, res => {
-      // Stream the response body line by line
-      let buffer = ''
-      res.on('data', chunk => {
-        buffer += chunk.toString('utf8')
-        // Process complete SSE lines
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || '' // Keep incomplete line in buffer
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            event.sender.send('hermes:api-stream:chunk', { data: line.slice(6) })
+    const req = client.request(
+      parsed,
+      {
+        method: request?.method || 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hermes-Session-Token': connection.token,
+          ...(body ? { 'Content-Length': String(body.length) } : {})
+        }
+      },
+      res => {
+        // Stream the response body line by line
+        let buffer = ''
+        res.on('data', chunk => {
+          buffer += chunk.toString('utf8')
+          // Process complete SSE lines
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || '' // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              event.sender.send('hermes:api-stream:chunk', { data: line.slice(6) })
+            }
           }
-        }
-      })
-      res.on('end', () => {
-        // Flush remaining buffer
-        if (buffer.startsWith('data: ')) {
-          event.sender.send('hermes:api-stream:chunk', { data: buffer.slice(6) })
-        }
-        event.sender.send('hermes:api-stream:done', { ok: true })
-      })
-      res.on('error', err => {
-        event.sender.send('hermes:api-stream:done', { ok: false, error: err.message })
-      })
-    })
+        })
+        res.on('end', () => {
+          // Flush remaining buffer
+          if (buffer.startsWith('data: ')) {
+            event.sender.send('hermes:api-stream:chunk', { data: buffer.slice(6) })
+          }
+
+          event.sender.send('hermes:api-stream:done', { ok: true })
+        })
+        res.on('error', err => {
+          event.sender.send('hermes:api-stream:done', { ok: false, error: err.message })
+        })
+      }
+    )
 
     req.on('error', err => {
       event.sender.send('hermes:api-stream:done', { ok: false, error: err.message })
@@ -13313,6 +13326,7 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
     if (body) {
       req.write(body)
     }
+
     req.end()
   } catch (err) {
     event.sender.send('hermes:api-stream:done', {

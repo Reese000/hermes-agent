@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator
+} from '@/components/ui/command'
 import { controlVariants } from '@/components/ui/control'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -100,10 +108,17 @@ export function SearchableSelect({
             setLiveError(err instanceof Error ? err.message : 'Live search failed')
           }
         })
-        .finally(() => { if (!cancelled) { setLiveLoading(false) } })
+        .finally(() => {
+          if (!cancelled) {
+            setLiveLoading(false)
+          }
+        })
     }, 300)
 
-    return () => { cancelled = true; window.clearTimeout(timer) }
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
   }, [search, open, liveSearchProvider, options])
 
   const handleSelect = useCallback(
@@ -153,7 +168,10 @@ export function SearchableSelect({
 
                 return (
                   <CommandItem key={option} onSelect={() => handleSelect(option)} value={option}>
-                    <Codicon className={cn('mr-2 size-4', option === value ? 'opacity-100' : 'opacity-0')} name="check" />
+                    <Codicon
+                      className={cn('mr-2 size-4', option === value ? 'opacity-100' : 'opacity-0')}
+                      name="check"
+                    />
                     <span className="flex-1 truncate">{option}</span>
                     {p && (
                       <span className="ml-2 shrink-0 text-xs text-muted-foreground">
@@ -168,9 +186,7 @@ export function SearchableSelect({
               <>
                 <CommandSeparator />
                 <CommandGroup heading="Live Search">
-                  {liveError && !liveLoading && (
-                    <div className="px-2 py-2 text-xs text-destructive">{liveError}</div>
-                  )}
+                  {liveError && !liveLoading && <div className="px-2 py-2 text-xs text-destructive">{liveError}</div>}
                   {liveLoading &&
                     Array.from({ length: 3 }).map((_, i) => (
                       <CommandItem disabled key={`skeleton-${i}`}>
@@ -183,7 +199,10 @@ export function SearchableSelect({
 
                       return (
                         <CommandItem key={model} onSelect={() => handleSelect(model)} value={`__live__${model}`}>
-                          <Codicon className={cn('mr-2 size-4', model === value ? 'opacity-100' : 'opacity-0')} name="check" />
+                          <Codicon
+                            className={cn('mr-2 size-4', model === value ? 'opacity-100' : 'opacity-0')}
+                            name="check"
+                          />
                           <span className="flex-1 truncate">{model}</span>
                           {p && (
                             <span className="ml-2 shrink-0 text-xs text-muted-foreground">

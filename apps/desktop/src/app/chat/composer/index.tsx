@@ -1,6 +1,15 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
-import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type ClipboardEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 
 import { useHudComposerDrag } from '@/app/hud/composer-drag'
 import { composerFill, composerFloatingStrip, composerSurfaceGlass } from '@/components/chat/composer-dock'
@@ -26,8 +35,8 @@ import { toggleReview } from '@/store/review'
 import { $gatewayState } from '@/store/session'
 import { $sessionStates } from '@/store/session-states'
 import { fetchSessionUsage } from '@/store/session-usage'
-import { $usageIntervalMs } from '@/store/usage-indicator'
 import { $threadScrolledUp } from '@/store/thread-scroll'
+import { $usageIntervalMs } from '@/store/usage-indicator'
 import { $autoSpeakReplies } from '@/store/voice-prefs'
 import { useTheme } from '@/themes'
 
@@ -189,9 +198,7 @@ export function ChatBar({
   // statusSessionId comment above) — they diverge for any resumed/persisted
   // session. Resolve before hitting the endpoint, same fallback as the
   // background-status bridge above: pre-persistence, runtime id IS the key.
-  const usageSessionId = sessionId
-    ? ($sessionStates.get()[sessionId]?.storedSessionId ?? sessionId)
-    : null
+  const usageSessionId = sessionId ? ($sessionStates.get()[sessionId]?.storedSessionId ?? sessionId) : null
 
   // Poll session usage data: fetch once on sessionId change, then at the
   // configured cadence while busy. UsageIndicator's cost/hr and tokens/sec
@@ -200,10 +207,14 @@ export function ChatBar({
   const usageIntervalMs = useStore($usageIntervalMs)
 
   useEffect(() => {
-    if (!usageSessionId) {return}
+    if (!usageSessionId) {
+      return
+    }
     void fetchSessionUsage(usageSessionId)
 
-    if (!busy) {return}
+    if (!busy) {
+      return
+    }
     const interval = setInterval(() => void fetchSessionUsage(usageSessionId), usageIntervalMs)
 
     return () => clearInterval(interval)
@@ -392,40 +403,52 @@ export function ChatBar({
 
       const flushPending = () => {
         rafId = null
+
         if (pending) {
           enhanced += pending
           pending = ''
           loadIntoComposer(enhanced, attachments)
         }
+
         flushResolve?.()
         flushResolve = null
       }
 
       for await (const chunk of enhancePromptStream(text, sessionId, enhanceProfile, controller.signal)) {
         if (sessionIdRef.current !== sessionId) {
-          if (rafId != null) cancelAnimationFrame(rafId)
+          if (rafId != null) {
+            cancelAnimationFrame(rafId)
+          }
+
           return
         }
+
         pending += chunk
+
         // Schedule a rAF to flush accumulated text to the DOM.
         // Multiple chunks within one frame accumulate in `pending`
         // and get flushed together at ~30fps.
         if (rafId == null) {
           rafId = requestAnimationFrame(flushPending)
         }
+
         // Yield so the rAF callback can fire between chunks
-        await new Promise<void>(r => { flushResolve = r })
+        await new Promise<void>(r => {
+          flushResolve = r
+        })
       }
 
       // Final flush — ensure the complete text is rendered
-      if (rafId != null) cancelAnimationFrame(rafId)
+      if (rafId != null) {
+        cancelAnimationFrame(rafId)
+      }
       flushPending()
 
       if (!enhanced || enhanced === text) {
         notify({
           kind: 'error',
           title: t.composer.enhanceFailed,
-          message: t.composer.enhanceFailed,
+          message: t.composer.enhanceFailed
         })
       }
     } catch (err) {
@@ -436,10 +459,12 @@ export function ChatBar({
       // Handle abort (cancel) — restore original text
       if (err instanceof DOMException && err.name === 'AbortError') {
         loadIntoComposer(enhanceOriginalTextRef.current, attachments)
+
         return
       }
 
       const msg = err instanceof Error ? err.message : String(err)
+
       // Map known error types to user-friendly messages
       const detail = msg.includes('rate_limited')
         ? t.composer.enhanceRateLimited
@@ -454,7 +479,7 @@ export function ChatBar({
       notify({
         kind: 'error',
         title: t.composer.enhanceFailed,
-        message: detail,
+        message: detail
       })
     } finally {
       enhanceAbortRef.current = null

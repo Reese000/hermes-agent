@@ -178,10 +178,13 @@ declare global {
       // Streaming API — sends SSE chunks via IPC event listeners.
       // Returns { dispose } to clean up listeners. Callers consume chunks
       // via onChunk/onDone callbacks until onDone fires.
-      apiStream: (request: HermesApiRequest, callbacks: {
-        onChunk: (payload: { data: string }) => void
-        onDone: (payload: { ok: boolean; error?: string }) => void
-      }) => { dispose: () => void }
+      apiStream: (
+        request: HermesApiRequest,
+        callbacks: {
+          onChunk: (payload: { data: string }) => void
+          onDone: (payload: { ok: boolean; error?: string }) => void
+        }
+      ) => { dispose: () => void }
       notify: (payload: HermesNotification) => Promise<boolean>
       requestMicrophoneAccess: () => Promise<boolean>
       /** read_window_below tool: metadata for the OS window directly underneath this one (never pixels). */

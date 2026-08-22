@@ -1,7 +1,7 @@
 import { atom } from 'nanostores'
 
-import { persistBoolean, persistString, storedBoolean, storedString } from '@/lib/storage'
 import type { ReasoningEffort } from '@/lib/reasoning-effort'
+import { persistBoolean, persistString, storedBoolean, storedString } from '@/lib/storage'
 
 // ── Enhance settings store ───────────────────────────────────────────────
 // Persists the prompt-enhancement feature's configuration to localStorage.
@@ -39,23 +39,23 @@ export const ENHANCE_PROFILES: Record<string, EnhanceProfile> = {
   syntax: {
     description: 'Focus on code syntax and structure only',
     label: 'Syntax Only',
-    reasoning: 'low',
+    reasoning: 'low'
   },
   minimal: {
     description: 'Quick, minimal changes — preserve original intent',
     label: 'Minimal',
-    reasoning: 'minimal',
+    reasoning: 'minimal'
   },
   balanced: {
     description: 'Balance clarity and detail',
     label: 'Balanced',
-    reasoning: 'medium',
+    reasoning: 'medium'
   },
   maximum: {
     description: 'Maximum enhancement — add specificity, constraints, context',
     label: 'Maximum',
-    reasoning: 'high',
-  },
+    reasoning: 'high'
+  }
 }
 
 /** Whether the enhance button is visible. */
@@ -74,9 +74,7 @@ export const $enhanceProvider = atom(storedString(PROVIDER_KEY) || 'openrouter')
 $enhanceProvider.subscribe(provider => persistString(PROVIDER_KEY, provider))
 
 /** Reasoning level for the enhance model. */
-export const $enhanceReasoning = atom<ReasoningEffort>(
-  (storedString(REASONING_KEY) as ReasoningEffort) || 'medium'
-)
+export const $enhanceReasoning = atom<ReasoningEffort>((storedString(REASONING_KEY) as ReasoningEffort) || 'medium')
 
 $enhanceReasoning.subscribe(level => persistString(REASONING_KEY, level))
 
@@ -92,12 +90,13 @@ export function getEnhanceConfig() {
     model: $enhanceModel.get(),
     profile: $enhanceProfile.get(),
     provider: $enhanceProvider.get(),
-    reasoning: $enhanceReasoning.get(),
+    reasoning: $enhanceReasoning.get()
   }
 }
 
 /** Get the active profile's settings. */
 export function getActiveProfile(): EnhanceProfile {
   const profileKey = $enhanceProfile.get()
+
   return ENHANCE_PROFILES[profileKey] || ENHANCE_PROFILES.balanced
 }
