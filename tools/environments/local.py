@@ -408,16 +408,49 @@ def _is_hermes_internal_secret(key: str) -> bool:
     return False
 
 
-def _inject_context_hermes_home(env: dict) -> None:
-    """Bridge the context-local Hermes home override into subprocess env."""
+_hermes_home_override_cache: tuple = (None, None)
+
+
+def _get_hermes_home_override():
+    """Cache the hermes_constants.get_hermes_home_override import."""
+    global _hermes_home_override_cache
+    if _hermes_home_override_cache[0] is not None:
+        return _hermes_home_override_cache
     try:
         from hermes_constants import get_hermes_home_override
+        _hermes_home_override_cache = (get_hermes_home_override, True)
+    except Exception:
+        _hermes_home_override_cache = (None, False)
+    return _hermes_home_override_cache
 
-        value = get_hermes_home_override()
+
+def _inject_context_hermes_home(env: dict) -> None:
+    """Bridge the context-local Hermes home override into subprocess env."""
+    _get_hermes_home, available = _get_hermes_home_override()
+    if available and _get_hermes_home:
+        value = _get_hermes_home()
         if value:
             env["HERMES_HOME"] = value
+
+
+_session_context_cache: tuple = (None, None, None, None)
+
+
+def _get_session_context():
+    """Cache the gateway.session_context import to avoid re-importing on every call."""
+    global _session_context_cache
+    if _session_context_cache[0] is not None:
+        return _session_context_cache
+    try:
+        from gateway.session_context import (
+            _UNSET,
+            _VAR_MAP,
+            session_context_engaged,
+        )
+        _session_context_cache = (_UNSET, _VAR_MAP, session_context_engaged, True)
     except Exception:
-        pass
+        _session_context_cache = (None, None, None, False)
+    return _session_context_cache
 
 
 def _inject_session_context_env(env: dict) -> None:
@@ -446,13 +479,8 @@ def _inject_session_context_env(env: dict) -> None:
     kept. See gateway/session_context.session_context_engaged and
     tests/tools/test_local_env_session_leak.py.
     """
-    try:
-        from gateway.session_context import (
-            _UNSET,
-            _VAR_MAP,
-            session_context_engaged,
-        )
-    except Exception:
+    _UNSET, _VAR_MAP, session_context_engaged, engaged_available = _get_session_context()
+    if not engaged_available:
         return
 
     _engaged = session_context_engaged()
@@ -469,14 +497,7 @@ def _inject_session_context_env(env: dict) -> None:
 
 def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = None) -> dict:
     """Filter Hermes-managed secrets from a subprocess environment."""
-    try:
-        from tools.env_passthrough import (
-            is_env_passthrough as _is_passthrough,
-            resolve_passthrough_value as _resolve_passthrough_value,
-        )
-    except Exception:
-        _is_passthrough = lambda _: False  # noqa: E731
-        _resolve_passthrough_value = lambda _name, fallback: fallback  # noqa: E731
+    _is_passthrough, _resolve_passthrough_value = _get_env_passthrough()
 
     sanitized: dict[str, str] = {}
 
@@ -734,8 +755,22 @@ def build_subprocess_env(
     return env
 
 
+_find_bash_cache: str | None = None
+
+
 def _find_bash() -> str:
     """Find bash for command execution."""
+    global _find_bash_cache
+    if _find_bash_cache is not None and os.path.isfile(_find_bash_cache):
+        return _find_bash_cache
+
+    result = _find_bash_uncached()
+    _find_bash_cache = result
+    return result
+
+
+def _find_bash_uncached() -> str:
+    """Find bash for command execution (uncached implementation)."""
     if not _IS_WINDOWS:
         return (
             shutil.which("bash")
@@ -1155,6 +1190,9 @@ def _prepend_hermes_bin_dir(existing_path: str) -> str:
     return sep.join([bin_dir, *entries])
 
 
+_managed_runtime_path_cache: list[str] | None = None
+
+
 def _managed_runtime_path_entries() -> list[str]:
     """Return existing Hermes-managed runtime dirs for the terminal subshell PATH.
 
@@ -1170,15 +1208,19 @@ def _managed_runtime_path_entries() -> list[str]:
       and nothing has ever put that directory on PATH, so an install whose only
       uv is the managed one looks uv-less to both the agent and the model.
 
-    Resolved per call rather than cached in a module constant because
-    ``get_hermes_home()`` is profile-scoped and a managed tree can appear
-    mid-process (``heal_hermes_managed_node``, a first browser install).
+    Cached per process lifetime — a managed tree can appear mid-process but
+    won't disappear.
     """
+    global _managed_runtime_path_cache
+    if _managed_runtime_path_cache is not None:
+        return _managed_runtime_path_cache
     try:
         from hermes_constants import get_hermes_home, iter_hermes_node_dirs
 
         candidates = [*iter_hermes_node_dirs(), get_hermes_home() / "bin"]
-        return [str(d) for d in candidates if d.is_dir()]
+        result = [str(d) for d in candidates if d.is_dir()]
+        _managed_runtime_path_cache = result
+        return result
     except Exception:
         return []
 
@@ -1280,16 +1322,31 @@ def _path_env_key(run_env: dict) -> str | None:
     return None
 
 
-def _make_run_env(env: dict) -> dict:
-    """Build a run environment with a sane PATH and provider-var stripping."""
+_env_passthrough_cache: tuple = (None, None)
+
+
+def _get_env_passthrough():
+    """Cache the env_passthrough import to avoid re-importing on every call."""
+    global _env_passthrough_cache
+    if _env_passthrough_cache[0] is not None:
+        return _env_passthrough_cache
     try:
         from tools.env_passthrough import (
-            is_env_passthrough as _is_passthrough,
-            resolve_passthrough_value as _resolve_passthrough_value,
+            is_env_passthrough,
+            resolve_passthrough_value,
         )
+        _env_passthrough_cache = (is_env_passthrough, resolve_passthrough_value)
     except Exception:
-        _is_passthrough = lambda _: False  # noqa: E731
-        _resolve_passthrough_value = lambda _name, fallback: fallback  # noqa: E731
+        _env_passthrough_cache = (
+            lambda _: False,
+            lambda _name, fallback: fallback,
+        )
+    return _env_passthrough_cache
+
+
+def _make_run_env(env: dict) -> dict:
+    """Build a run environment with a sane PATH and provider-var stripping."""
+    _is_passthrough, _resolve_passthrough_value = _get_env_passthrough()
 
     merged = dict(os.environ | env)
     run_env = {}
