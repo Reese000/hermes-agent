@@ -182,10 +182,11 @@ export function ComposerControls({
                   text to visually de-emphasize it. ──────────────────────── */}
               <Tip label={enhancing ? c.enhancing : (
                 <>
-                  <span className="!block">{c.enhance} — {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
-                  <span className="!block text-[9px] italic opacity-50">right-click to configure</span>
+                  <span className="!block font-medium">{c.enhance}</span>
+                  <span className="!block text-[10px] opacity-70">{displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
+                  <span className="!block mt-0.5 text-[8px] italic opacity-40">right-click to configure</span>
                 </>
-              )}>
+              )} className="max-w-52">
                 <Button
                   aria-label={enhancing ? c.enhancing : c.enhance}
                   className={cn(GHOST_ICON_BTN, 'p-0')}

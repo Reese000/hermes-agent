@@ -170,9 +170,10 @@ export function ModelCatalogMenu({
   // The search input lives inside a Radix DropdownMenu. Radix's focus group
   // moves DOM focus to the first interactive item when items mount/unmount —
   // live results arriving (or the loading skeleton replacing them) yanks the
-  // caret out of the input mid-typing. Hold focus on the input: run after
-  // Radix's own layout effects so we win the focus fight, and only when the
-  // input is actually mounted and not already focused.
+  // caret out of the input mid-typing. Also fires when the static model list
+  // loads (providers change from the modelOptions query), which causes a full
+  // list re-render that triggers the same focus steal. Hold focus on the
+  // input: run after Radix's own layout effects so we win the focus fight.
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   useLayoutEffect(() => {
@@ -181,7 +182,7 @@ export function ModelCatalogMenu({
     if (input && document.activeElement !== input) {
       input.focus()
     }
-  }, [liveResults, liveLoading, liveError])
+  }, [liveResults, liveLoading, liveError, providers])
 
   const hasOpenRouter = useMemo(
     () => providers?.some(p => p.slug.toLowerCase() === 'openrouter') ?? false,
