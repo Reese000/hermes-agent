@@ -54,27 +54,19 @@ import {
   $enhanceReasoning,
   ENHANCE_PROFILES
 } from '@/store/enhance-settings'
+import { $hudMode, closeHud, resetHudLayout } from '@/store/hud'
 import { $wakeWord, toggleWakeWord } from '@/store/wake-word'
 
 import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from '@/app/shell/model-catalog-menu'
+import { ACTIVE_ICON_BTN, GHOST_ICON_BTN, PRIMARY_ICON_BTN } from './control-classes'
 import type { ConversationStatus } from './hooks/use-voice-conversation'
 import { ModelPill } from './model-pill'
 import type { ChatBarState, VoiceStatus } from './types'
+import { VoiceMenu } from './voice-menu'
 
-export const ICON_BTN = 'size-(--composer-control-size) shrink-0 rounded-md'
-export const GHOST_ICON_BTN = cn(
-  ICON_BTN,
-  'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
-)
-// Send/voice-conversation primary: solid foreground-on-background circle
-// (reads as black-on-white in light mode, white-on-black in dark mode) to
-// match the reference composer's high-contrast CTA. Keeps the pill itself
-// neutral and lets the action visually dominate the row.
-export const PRIMARY_ICON_BTN = cn(
-  'size-(--composer-control-primary-size,var(--composer-control-size)) shrink-0 rounded-full p-0',
-  'bg-foreground text-background hover:bg-foreground/90',
-  'disabled:bg-foreground/30 disabled:text-background disabled:opacity-100'
-)
+// Re-exported: `context-menu.tsx` and other row neighbours have always reached
+// for these here, and the row is where they read as belonging.
+export { ACTIVE_ICON_BTN, GHOST_ICON_BTN, ICON_BTN, PRIMARY_ICON_BTN } from './control-classes'
 
 interface ConversationProps {
   active: boolean
@@ -96,7 +88,9 @@ export function ComposerControls({
   conversation,
   disabled,
   enhancing = false,
+  foldVoice = false,
   hasComposerPayload,
+  minimal = false,
   onCancelEnhance,
   onEnhance,
   state,
@@ -113,7 +107,9 @@ export function ComposerControls({
   conversation: ConversationProps
   disabled: boolean
   enhancing?: boolean
+  foldVoice?: boolean
   hasComposerPayload: boolean
+  minimal?: boolean
   onCancelEnhance?: () => void
   onEnhance?: () => void
   state: ChatBarState
@@ -124,6 +120,7 @@ export function ComposerControls({
 }) {
   const { t } = useI18n()
   const c = t.composer
+  const hudMode = useStore($hudMode)
 
   const enhanceEnabled = useStore($enhanceEnabled)
   const enhanceModel = useStore($enhanceModel)
@@ -165,25 +162,40 @@ export function ComposerControls({
   }
 
   const showVoicePrimary = !busy && !hasComposerPayload
-  const busyLabel = busyAction === 'queue' ? c.queueMessage : busyAction === 'steer' ? c.steer : c.stop
+  // Steer is just send: a payload keeps the Send affordance mid-turn. Stop
+  // only when the composer is empty and a turn is running.
+  const showStop = busy && !hasComposerPayload
+  const showQueueButton = busyAction !== 'stop' && hasComposerPayload
+  const foldedVoice = hudMode || foldVoice
+
+  const voiceControls = foldedVoice ? (
+    <VoiceMenu
+      autoSpeak={autoSpeak}
+      disabled={disabled}
+      onDictate={onDictate}
+      onStartConversation={conversation.onStart}
+      onToggleAutoSpeak={onToggleAutoSpeak}
+      state={state}
+      voiceStatus={voiceStatus}
+    />
+  ) : (
+    <>
+      <DictationButton disabled={disabled} onToggle={onDictate} state={state.voice} status={voiceStatus} />
+      <AutoSpeakButton active={autoSpeak} disabled={disabled} onToggle={onToggleAutoSpeak} />
+      <WakeWordButton disabled={disabled} />
+    </>
+  )
 
   return (
-    <div className="ml-auto flex shrink-0 items-center gap-(--composer-control-gap)">
+    <div className="ml-auto flex min-w-0 shrink items-center gap-(--composer-control-gap)">
       {onEnhance && enhanceEnabled ? (
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div className="contents">
-              {/* ── Enhance tooltip ─────────────────────────────────────
-                  Two-line tooltip: model+reasoning on line 1, hint on line 2.
-                  Uses ReactNode (not plain string) for multi-line layout.
-                  `!block` overrides the TooltipContent inner span's
-                  `[&>*]:!inline-flex` rule which otherwise collapses both
-                  spans onto one line. The hint line uses 9px italic faded
-                  text to visually de-emphasize it. ──────────────────────── */}
               <Tip label={enhancing ? c.enhancing : (
                 <>
                   <span className="!block font-medium">{c.enhance}</span>
-                  <span className="!block text-[10px] opacity-70">{displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
+                  <span className="!block text-[10px] opacity-70">{ENHANCE_PROFILES[enhanceProfile]?.label || enhanceProfile} · {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
                   <span className="!block mt-0.5 text-[8px] italic opacity-40">right-click to configure</span>
                 </>
               )} className="max-w-52">
@@ -224,12 +236,6 @@ export function ComposerControls({
                 ))}
               </ContextMenuSubContent>
             </ContextMenuSub>
-            {/* ── Model selector row ────────────────────────────────────
-                Opens the DropdownMenu below on BOTH click and hover.
-                `onPointerEnter` gives hover-to-open UX like the main
-                model pill dropdown. `onSelect` handles click as fallback.
-                The DropdownMenu's sr-only trigger anchors the dropdown
-                near this row (side="top" align="start"). ──────────────── */}
             <ContextMenuItem
               onSelect={() => setModelMenuOpen(true)}
               onPointerEnter={() => setModelMenuOpen(true)}
@@ -241,28 +247,7 @@ export function ComposerControls({
           </ContextMenuContent>
         </ContextMenu>
       ) : null}
-      {/* ── Enhance model catalog DropdownMenu ─────────────────────────
-          MUST be a separate DropdownMenu (not inside ContextMenu) because
-          ModelCatalogMenu renders DropdownMenu* primitives that require a
-          DropdownMenu provider context. Radix ContextMenu and DropdownMenu
-          have incompatible provider trees — nesting causes
-          "MenuItem must be used within Menu" crashes.
-
-          The trigger is a visually hidden <span className="sr-only" />.
-          Radix DropdownMenu needs a DOM element to calculate position;
-          without one it defaults to the screen corner. The sr-only span
-          sits in the normal flow near the enhance button, giving Radix
-          a valid anchor. Content uses side="top" align="start" to appear
-          above the composer, left-aligned with the enhance button.
-
-          Controlled via `modelMenuOpen` state, toggled by the context
-          menu's "Model:" row (onSelect + onPointerEnter).
-
-          ModelMenuCloseContext lets ModelCatalogMenu's internal close
-          calls (on model select, keyboard Enter) dismiss this dropdown. */}
       <DropdownMenu open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
-        {/* Hidden trigger — Radix needs a DOM element to anchor the dropdown
-            to. Visually hidden so only the context menu "Model:" row opens it. */}
         <DropdownMenuTrigger asChild>
           <span className="sr-only" />
         </DropdownMenuTrigger>
@@ -275,11 +260,13 @@ export function ComposerControls({
           </ModelMenuCloseContext.Provider>
         </DropdownMenuContent>
       </DropdownMenu>
-      <ModelPill compact={compactModelPill} disabled={disabled} model={state.model} />
-      <DictationButton disabled={disabled} onToggle={onDictate} state={state.voice} status={voiceStatus} />
-      <AutoSpeakButton active={autoSpeak} disabled={disabled} onToggle={onToggleAutoSpeak} />
-      <WakeWordButton disabled={disabled} />
-      {busyAction === 'steer' ? (
+      {minimal ? null : (
+        <>
+          <ModelPill compact={compactModelPill} disabled={disabled} model={state.model} />
+          {voiceControls}
+        </>
+      )}
+      {showQueueButton ? (
         <Tip label={<TipKeybindLabel actionId="composer.queue" text={c.queueMessage} />}>
           <Button
             aria-label={c.queueMessage}
@@ -349,7 +336,48 @@ export function ComposerControls({
           </Button>
         </Tip>
       )}
+      {/* The way out of HUD mode, riding the controls row rather than floating
+          above the bar. The old chip lived in a 26px transparent strip reserved
+          over the composer (--hud-chip-strip), which under glass is bare
+          untinted material with a hidden button in it — a band of chrome above
+          the surface, paid for in every state, for a control that is invisible
+          until hovered. Here it costs no reserved space and sits with the other
+          things you can press. */}
+      {hudMode ? <HudWindowButtons /> : null}
     </div>
+  )
+}
+
+function HudWindowButtons() {
+  const { t } = useI18n()
+
+  return (
+    <>
+      <Tip label={t.titlebar.resetHudLayout}>
+        <Button
+          aria-label={t.titlebar.resetHudLayout}
+          className={cn(GHOST_ICON_BTN, 'p-0')}
+          onClick={resetHudLayout}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <Codicon name="discard" size="0.875rem" />
+        </Button>
+      </Tip>
+      <Tip label={t.titlebar.exitHud}>
+        <Button
+          aria-label={t.titlebar.exitHud}
+          className={cn(GHOST_ICON_BTN, 'p-0')}
+          onClick={closeHud}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <Codicon name="screen-normal" size="0.875rem" />
+        </Button>
+      </Tip>
+    </>
   )
 }
 
@@ -476,11 +504,7 @@ function AutoSpeakButton({ active, disabled, onToggle }: { active: boolean; disa
       <Button
         aria-label={label}
         aria-pressed={active}
-        className={cn(
-          GHOST_ICON_BTN,
-          'p-0',
-          active && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
-        )}
+        className={cn(GHOST_ICON_BTN, 'p-0', active && ACTIVE_ICON_BTN)}
         disabled={disabled}
         onClick={() => {
           triggerHaptic(active ? 'close' : 'open')
@@ -525,11 +549,7 @@ function WakeWordButton({ disabled, pausedForVoice = false }: { disabled: boolea
       <Button
         aria-label={label}
         aria-pressed={wake.listening && !pausedForVoice}
-        className={cn(
-          GHOST_ICON_BTN,
-          'p-0',
-          wake.listening && !pausedForVoice && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
-        )}
+        className={cn(GHOST_ICON_BTN, 'p-0', wake.listening && !pausedForVoice && ACTIVE_ICON_BTN)}
         disabled={disabled || pausedForVoice || wake.pending}
         onClick={() => {
           triggerHaptic(wake.listening ? 'close' : 'open')
@@ -572,7 +592,7 @@ function DictationButton({
           GHOST_ICON_BTN,
           'p-0',
           'data-[active=true]:bg-accent data-[active=true]:text-foreground',
-          status === 'recording' && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary',
+          status === 'recording' && ACTIVE_ICON_BTN,
           status === 'transcribing' && 'bg-primary/10 text-primary'
         )}
         data-active={active}

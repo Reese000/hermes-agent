@@ -670,22 +670,47 @@ class GitHubSource(SkillSource):
         files: Dict[str, Union[str, bytes]] = {"SKILL.md": skill_md}
         tree = self._get_repo_tree(repo)
         if tree is not None:
+            # Download the FULL skill directory, not just SKILL.md-linked
+            # paths. Link-driven fetching silently dropped every support file
+            # a skill keeps under a non-canonical dir name (`reference/`,
+            # `agents/`, root-level LICENSE/params files) or that only a
+            # reference file links — the exact gap the optional-skills live
+            # fetch already works around (see _fetch_live_optional_bundle).
+            # Everything still flows through quarantine + scan before
+            # install, and the scanner sees MORE this way, not less.
             branch, entries = tree
             prefix = f"{skill_path.rstrip('/')}/"
-            entries_by_path = {item.get("path", ""): item for item in entries}
-            for rel_path in sorted(referenced):
-                item_path = f"{prefix}{rel_path}"
-                item = entries_by_path.get(item_path)
-                if item is None:
-                    logger.warning("Referenced skill support file is missing: %s", item_path)
-                    return None
+            for item in entries:
                 if item.get("type") != "blob" or item.get("mode") == "120000":
-                    logger.warning("Rejected non-regular file in skill bundle: %s", item_path)
+                    continue
+                item_path = item.get("path", "")
+                if not item_path.startswith(prefix):
+                    continue
+                rel_path = item_path[len(prefix):]
+                if rel_path == "SKILL.md":
+                    continue
+                base = rel_path.rsplit("/", 1)[-1]
+                if base.startswith(".") or base.endswith(".pyc") or "__pycache__" in rel_path.split("/"):
+                    continue
+                try:
+                    rel_path = _validate_bundle_rel_path(rel_path)
+                except ValueError:
+                    logger.warning("Rejected unsafe file path in skill bundle: %s", item_path)
                     return None
                 content = self._fetch_file_bytes(repo, item_path)
                 if content is None:
                     return None
                 files[rel_path] = content
+            # A support file SKILL.md links must actually exist as a regular
+            # file — a missing or symlinked referenced path rejects the
+            # bundle rather than installing a skill with dangling links.
+            for rel_path in sorted(referenced):
+                if rel_path not in files:
+                    logger.warning(
+                        "Referenced skill support file is missing: %s%s",
+                        prefix, rel_path,
+                    )
+                    return None
             revision = self._tree_revisions.get(repo) or branch
         else:
             for rel_path in referenced:
@@ -2302,12 +2327,15 @@ class ClawHubSource(SkillSource):
         return deduped
 
     def _exact_slug_meta(self, query: str) -> Optional[SkillMeta]:
-        slug = query.strip().split("/")[-1]
+        query = query.strip()
+        parsed = self._parse_identifier(query)
         query_terms = self._query_terms(query)
         candidates: List[str] = []
 
-        if slug and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", slug):
-            candidates.append(slug)
+        if parsed:
+            candidates.append(parsed[0])
+        elif "/" not in query and self._SLUG_RE.fullmatch(query):
+            candidates.append(query)
 
         if query_terms:
             base_slug = "-".join(query_terms)
@@ -2443,11 +2471,73 @@ class ClawHubSource(SkillSource):
         _write_index_cache(cache_key, [_skill_meta_to_dict(s) for s in final_results])
         return final_results
 
-    def fetch(self, identifier: str) -> Optional[SkillBundle]:
-        slug = identifier.split("/")[-1]
+    _SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-        skill_data = self._get_json(f"{self.BASE_URL}/skills/{slug}")
+    @classmethod
+    def _parse_identifier(cls, identifier: str) -> Optional[Tuple[str, Optional[str]]]:
+        """Return ``(slug, expected_owner)`` for a ClawHub identifier.
+
+        Accepts a bare slug, ``clawhub/<slug>``, ``@owner/slug``, and the
+        clawhub.ai URL path ``owner/skills/slug``. GitHub-style
+        ``owner/repo/skill`` and ``owner/repo/skills/skill`` identifiers
+        are not ClawHub's — claiming them by last path segment installs
+        a same-named skill from a different author.
+        """
+        raw = (identifier or "").strip()
+        if not raw:
+            return None
+        had_at = raw.startswith("@")
+        ident = raw[1:] if had_at else raw
+        if ident.startswith("clawhub/"):
+            ident = ident[len("clawhub/"):]
+        parts = [part for part in ident.split("/") if part]
+        if len(parts) == 1:
+            slug = parts[0]
+            return (slug, None) if cls._SLUG_RE.fullmatch(slug) else None
+        if len(parts) == 2 and had_at:
+            owner, slug = parts
+            if cls._SLUG_RE.fullmatch(owner) and cls._SLUG_RE.fullmatch(slug):
+                return slug, owner
+            return None
+        if len(parts) == 3 and parts[1].lower() == "skills":
+            owner, _, slug = parts
+            if cls._SLUG_RE.fullmatch(owner) and cls._SLUG_RE.fullmatch(slug):
+                return slug, owner
+            return None
+        return None
+
+    @staticmethod
+    def _owner_from_payload(data: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not isinstance(data, dict):
+            return None
+        owner = data.get("owner")
+        if isinstance(owner, dict):
+            handle = owner.get("handle")
+            if isinstance(handle, str) and handle.strip():
+                return handle.strip()
+        if isinstance(owner, str) and owner.strip():
+            return owner.strip()
+        return None
+
+    @classmethod
+    def _owner_matches(cls, expected_owner: Optional[str], data: Optional[Dict[str, Any]]) -> bool:
+        if not expected_owner:
+            return True
+        actual = cls._owner_from_payload(data)
+        if not actual:
+            return True
+        return actual.lower() == expected_owner.lower()
+
+    def fetch(self, identifier: str) -> Optional[SkillBundle]:
+        parsed = self._parse_identifier(identifier)
+        if parsed is None:
+            return None
+        slug, expected_owner = parsed
+
+        skill_data = self._coerce_skill_payload(self._get_json(f"{self.BASE_URL}/skills/{slug}"))
         if not isinstance(skill_data, dict):
+            return None
+        if not self._owner_matches(expected_owner, skill_data):
             return None
 
         latest_version = self._resolve_latest_version(slug, skill_data)
@@ -2486,21 +2576,22 @@ class ClawHubSource(SkillSource):
         )
 
     def inspect(self, identifier: str) -> Optional[SkillMeta]:
-        slug = identifier.split("/")[-1]
+        parsed = self._parse_identifier(identifier)
+        if parsed is None:
+            return None
+        slug, expected_owner = parsed
         data = self._coerce_skill_payload(self._get_json(f"{self.BASE_URL}/skills/{slug}"))
         if not isinstance(data, dict):
+            return None
+        if not self._owner_matches(expected_owner, data):
             return None
 
         tags = self._normalize_tags(data.get("tags", []))
         extra: Dict[str, Any] = {}
         # The detail API returns owner info — capture it so callers can build
         # valid ClawHub URLs (https://clawhub.ai/{owner}/skills/{slug}).
-        owner = data.get("owner")
-        if isinstance(owner, dict):
-            handle = owner.get("handle")
-            if isinstance(handle, str) and handle:
-                extra["owner"] = handle
-        elif isinstance(owner, str) and owner:
+        owner = self._owner_from_payload(data)
+        if owner:
             extra["owner"] = owner
 
         return SkillMeta(
@@ -2597,14 +2688,8 @@ class ClawHubSource(SkillSource):
                 summary = item.get("summary") or item.get("description") or ""
                 tags = self._normalize_tags(item.get("tags", []))
                 extra: Dict[str, Any] = {}
-                # The listing API may include owner info (handle) in future;
-                # capture it if present so we can build valid detail URLs.
-                owner = item.get("owner")
-                if isinstance(owner, dict):
-                    handle = owner.get("handle")
-                    if isinstance(handle, str) and handle:
-                        extra["owner"] = handle
-                elif isinstance(owner, str) and owner:
+                owner = self._owner_from_payload(item)
+                if owner:
                     extra["owner"] = owner
                 results.append(SkillMeta(
                     name=display_name,
@@ -2708,14 +2793,7 @@ class ClawHubSource(SkillSource):
                 data = self._coerce_skill_payload(raw)
                 if not isinstance(data, dict):
                     return None
-                owner = data.get("owner")
-                if isinstance(owner, dict):
-                    handle = owner.get("handle")
-                    if isinstance(handle, str) and handle:
-                        return handle
-                if isinstance(owner, str) and owner:
-                    return owner
-                return None
+                return self._owner_from_payload(data)
 
             if resp.status_code == 429:
                 # Rate-limited — honour Retry-After if present, else backoff.
@@ -3370,6 +3448,16 @@ class OptionalSkillSource(SkillSource):
         else:
             skill_dir = resolved
 
+        # Upstream-maintained entries: the local dir is a catalog stub whose
+        # frontmatter points at the real skill in an external repo the
+        # upstream project maintains (e.g. impeccable's Hermes-native bundle
+        # under pbakaus/impeccable:.hermes/skills/impeccable). Install pulls
+        # the live content from there instead of vendoring a fork here.
+        upstream = self._upstream_pointer(skill_dir)
+        if upstream is not None:
+            rel_id = skill_dir.resolve().relative_to(self._optional_dir.resolve()).as_posix()
+            return self._fetch_from_upstream(upstream, rel_id)
+
         files: Dict[str, Union[str, bytes]] = {}
         for f in skill_dir.rglob("*"):
             if (
@@ -3496,6 +3584,11 @@ class OptionalSkillSource(SkillSource):
         if "SKILL.md" not in files:
             return None
 
+        # Live-fetched catalog stubs redirect the same way local ones do.
+        upstream = self._upstream_pointer_from_content(files["SKILL.md"])
+        if upstream is not None:
+            return self._fetch_from_upstream(upstream, rel)
+
         logger.info("Optional skill '%s' fetched from live repo (not in local checkout)", rel)
         return SkillBundle(
             name=rel.rsplit("/", 1)[-1],
@@ -3544,6 +3637,87 @@ class OptionalSkillSource(SkillSource):
 
         self._remote_dirs = dirs
         return dirs
+
+    def _upstream_pointer(self, skill_dir: Path) -> Optional[Dict[str, str]]:
+        """Return the upstream pointer for a catalog-stub skill dir, if any.
+
+        A stub declares ``metadata.hermes.upstream`` in its SKILL.md
+        frontmatter:
+
+            metadata:
+              hermes:
+                upstream:
+                  repo: pbakaus/impeccable
+                  path: .hermes/skills/impeccable
+
+        Returns ``{"repo": ..., "path": ...}`` or None for normal
+        (fully-vendored) optional skills.
+        """
+        skill_md = skill_dir / "SKILL.md"
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        return self._upstream_pointer_from_content(content)
+
+    def _upstream_pointer_from_content(self, content: Union[str, bytes]) -> Optional[Dict[str, str]]:
+        """Parse ``metadata.hermes.upstream`` out of SKILL.md content."""
+        if isinstance(content, bytes):
+            try:
+                content = content.decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+        fm = self._parse_frontmatter(content)
+        meta_block = fm.get("metadata")
+        if not isinstance(meta_block, dict):
+            return None
+        hermes_meta = meta_block.get("hermes")
+        if not isinstance(hermes_meta, dict):
+            return None
+        upstream = hermes_meta.get("upstream")
+        if not isinstance(upstream, dict):
+            return None
+        repo = str(upstream.get("repo", "")).strip().strip("/")
+        path = str(upstream.get("path", "")).strip().strip("/")
+        # repo must be exactly owner/name; path must be a clean relative path.
+        if not repo or repo.count("/") != 1 or not path:
+            return None
+        parts = [p for p in path.split("/") if p not in ("", ".")]
+        if not parts or any(p == ".." for p in parts):
+            return None
+        return {"repo": repo, "path": "/".join(parts)}
+
+    def _fetch_from_upstream(self, upstream: Dict[str, str], rel_id: str) -> Optional[SkillBundle]:
+        """Fetch an upstream-maintained optional skill from its external repo.
+
+        Delegates to GitHubSource.fetch() (full-directory download through the
+        git tree, symlink/unsafe-path rejection, quarantine + scan downstream)
+        but re-labels the bundle as an official catalog entry so trust,
+        identifier, and update tracking stay in the optional-skills namespace.
+        """
+        github = self._get_github()
+        bundle = github.fetch(f"{upstream['repo']}/{upstream['path']}")
+        if bundle is None:
+            logger.warning(
+                "Upstream fetch failed for optional skill %s (%s:%s)",
+                rel_id, upstream["repo"], upstream["path"],
+            )
+            return None
+        return SkillBundle(
+            name=bundle.name,
+            files=bundle.files,
+            source="official",
+            identifier=f"official/{rel_id}",
+            # Curated-catalog endorsement, but the content comes live from a
+            # third-party repo — "trusted", not "builtin", so a dangerous
+            # scan verdict still blocks install (INSTALL_POLICY).
+            trust_level="trusted",
+            metadata={
+                **bundle.metadata,
+                "upstream_repo": upstream["repo"],
+                "upstream_path": upstream["path"],
+            },
+        )
 
     def _find_skill_dir(self, name: str) -> Optional[Path]:
         """Find a skill directory by name anywhere in optional-skills/."""
@@ -4617,5 +4791,11 @@ def unified_search(query: str, sources: List[SkillSource],
         elif _TRUST_RANK.get(r.trust_level, 0) > _TRUST_RANK.get(seen[r.identifier].trust_level, 0):
             seen[r.identifier] = r
     deduped = list(seen.values())
+
+    # Stable-sort by trust rank before truncating: the limit cut must not
+    # drop a builtin/official catalog entry because a high-volume community
+    # source (skills.sh mirrors every repo) happened to finish first and
+    # flood the merged list. Insertion order is preserved within each rank.
+    deduped.sort(key=lambda r: -_TRUST_RANK.get(r.trust_level, 0))
 
     return deduped[:limit]
