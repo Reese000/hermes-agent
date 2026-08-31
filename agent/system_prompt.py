@@ -26,13 +26,12 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from agent.harness_profiles import resolve_profile
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY,
-    GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     HERMES_AGENT_HELP_GUIDANCE,
     KANBAN_GUIDANCE,
     MEMORY_GUIDANCE,
-    OPENAI_MODEL_EXECUTION_GUIDANCE,
     PARALLEL_TOOL_CALL_GUIDANCE,
     PLATFORM_HINTS,
     SESSION_SEARCH_GUIDANCE,
@@ -40,7 +39,6 @@ from agent.prompt_builder import (
     STEER_CHANNEL_NOTE,
     TASK_COMPLETION_GUIDANCE,
     TOOL_USE_ENFORCEMENT_GUIDANCE,
-    TOOL_USE_ENFORCEMENT_MODELS,
     drain_truncation_warnings,
 )
 from agent.runtime_cwd import resolve_context_cwd
@@ -243,29 +241,17 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             # "auto" or any unrecognised value — delegate to the harness
             # profile resolved at session start (see agent/agent_init.py).
             _hp = getattr(agent, "_harness_profile", None)
-            if _hp is not None:
-                _inject = _hp.tool_use_enforcement
-            else:
-                # Fallback for code paths that bypass agent_init (rare).
-                from agent.prompt_builder import TOOL_USE_ENFORCEMENT_MODELS
-                model_lower = (agent.model or "").lower()
-                _inject = any(p in model_lower for p in TOOL_USE_ENFORCEMENT_MODELS)
+            if _hp is None:
+                _hp = resolve_profile(agent.model, getattr(agent, "provider", None))
+            _inject = _hp.tool_use_enforcement
         if _inject:
             stable_parts.append(TOOL_USE_ENFORCEMENT_GUIDANCE)
-            # Execution guidance — delegated to the harness profile instead
-            # of inline substring matching.  Each profile carries its own
-            # execution_guidance string (OpenAI, Google, MiMo, or empty).
+            # Execution guidance — resolved from the harness profile.
             _hp = getattr(agent, "_harness_profile", None)
-            if _hp is not None and _hp.execution_guidance:
+            if _hp is None:
+                _hp = resolve_profile(agent.model, getattr(agent, "provider", None))
+            if _hp.execution_guidance:
                 stable_parts.append(_hp.execution_guidance)
-            else:
-                # Fallback: inline substring matching for code paths that
-                # bypass agent_init.
-                _model_lower = (agent.model or "").lower()
-                if "gemini" in _model_lower or "gemma" in _model_lower:
-                    stable_parts.append(GOOGLE_MODEL_OPERATIONAL_GUIDANCE)
-                if "gpt" in _model_lower or "codex" in _model_lower or "grok" in _model_lower:
-                    stable_parts.append(OPENAI_MODEL_EXECUTION_GUIDANCE)
 
     has_skills_tools = any(name in agent.valid_tool_names for name in ['skills_list', 'skill_view', 'skill_manage'])
     if has_skills_tools:
