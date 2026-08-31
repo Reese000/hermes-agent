@@ -1650,6 +1650,31 @@ def _record_edit_outcome(
         logger.debug("edit outcome ledger write failed", exc_info=True)
 
 
+def _try_edit_delegation(path, old_string, new_string, error_text, retry):
+    """Ask the editor model to re-anchor a failed replace (W5).
+
+    *retry* is called with the delegation result and must re-attempt the
+    edit; its return value is passed straight back. Returns ``None`` to
+    fall through to the ordinary escalation hint.  Best-effort and silent: an optional recovery
+    must never turn a failed edit into a failed tool call.
+    """
+    try:
+        from agent.edit_delegate import delegate_edit
+
+        # delegate_edit owns the re-entrancy scope and calls retry inside
+        # it, so the retry cannot delegate again if it also misses.
+        return delegate_edit(
+            path=path,
+            old_string=old_string,
+            new_string=new_string,
+            error_text=error_text,
+            retry=retry,
+        )
+    except Exception:
+        logger.debug("edit delegation failed", exc_info=True)
+        return None
+
+
 def _attach_related_context(result_dict: dict, resolved_path, task_id: str) -> None:
     """Attach the point-of-use related-files footer to a read result (W6b).
 
@@ -1985,6 +2010,41 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
             if _failed_path:
                 _attempts = _record_patch_failure(task_id, _failed_path)
                 escalation = escalation_hint(task_id, _failed_path, mode)
+
+            # Architect/editor split (W5). The cheap advice above gets its
+            # turn first; only once the format chain has failed to land the
+            # edit is it worth paying for a second model. Replace mode only:
+            # it is the one shape where the intent is unambiguous, and the
+            # editor is asked solely to correct WHERE - new_string is the
+            # architect's own, reused verbatim.
+            from agent.edit_delegate import DELEGATE_AFTER
+
+            if (
+                mode == "replace"
+                and _failed_path
+                and _attempts >= DELEGATE_AFTER
+                and old_string
+            ):
+                def _retry_delegated(_d):
+                    _r = json.loads(patch_tool(
+                        mode="replace",
+                        path=path,
+                        old_string=_d["old_string"],
+                        new_string=new_string,
+                        task_id=task_id,
+                        session_id=session_id,
+                    ))
+                    if _r.get("error"):
+                        return None
+                    _r["_hint"] = _d["note"]
+                    return json.dumps(_r, ensure_ascii=False)
+
+                _rescued = _try_edit_delegation(
+                    _failed_path, old_string, new_string, _err_text,
+                    _retry_delegated,
+                )
+                if _rescued:
+                    return _rescued
 
             # patch_replace may already have attached a "Did you mean one of
             # these sections?" snippet, which is strictly more useful than
