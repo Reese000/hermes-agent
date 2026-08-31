@@ -73,7 +73,11 @@ class HarnessProfile:
     Fields consumed by later workstreams (W2/W4):
       * ``tool_description_overrides`` — per-tool description replacement (W2)
       * ``tool_description_appends`` — per-tool description addendum (W2, preferred)
-      * ``retry_format_chain`` — retry format escalation chain (W4)
+      * ``retry_format_chain`` — edit-format fallback order (W4).  Leave
+        empty to derive it from ``edit_format``; pin it only when a family
+        needs a different order.  Consumed by
+        ``agent.edit_escalation.resolve_chain`` and surfaced in the coding
+        brief, so it is fixed for the session and cache-safe.
     """
 
     name: str
@@ -211,6 +215,11 @@ MIMO_PROFILE = HarnessProfile(
             "retrying - do not resend the same patch."
         ),
     },
+    # MIMO is the family that most often fails to land a patch (hence the
+    # addendum above), so route its fallback around patch rather than
+    # through it: the derived default would send it to the format it is
+    # worst at.
+    retry_format_chain=("replace", "write_file"),
 )
 
 GENERIC_PROFILE = HarnessProfile(

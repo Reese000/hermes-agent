@@ -507,6 +507,14 @@ def build_turn_context(
     except Exception:  # noqa: BLE001
         pass
 
+    # Reset per-file edit-failure streaks (W4) so a file that failed to patch
+    # last turn does not start this turn already escalated.
+    try:
+        from agent.edit_escalation import reset as reset_edit_escalation
+        reset_edit_escalation()
+    except Exception:  # noqa: BLE001
+        pass
+
     # Record the execution thread so interrupt()/clear_interrupt() can scope
     # the tool-level interrupt signal to THIS agent's thread only.
     agent._execution_thread_id = threading.current_thread().ident

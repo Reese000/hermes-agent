@@ -170,6 +170,29 @@ def _model_family(model: Optional[str]) -> Optional[str]:
     return profile.edit_format
 
 
+def _edit_escalation_line(model: Optional[str]) -> str:
+    """The family's edit-format fallback order, as one coding-brief line.
+
+    Consumes ``HarnessProfile.retry_format_chain``.  Depends only on the
+    model id, which is fixed for the session, so this stays cache-safe.
+    Returns ``""`` for any profile without a usable chain.
+
+    Gated on ``_model_family`` for the same reason ``_edit_format_line`` is:
+    an unknown model gets the generic profile, and the brief must stay
+    neutral for it rather than steering it toward a format nobody verified
+    it handles.
+    """
+    if _model_family(model) is None:
+        return ""
+    try:
+        from agent.edit_escalation import escalation_brief_line
+        from agent.harness_profiles import resolve_profile
+
+        return escalation_brief_line(resolve_profile(model))
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _edit_format_line(model: Optional[str]) -> str:
     """The edit-format guidance line for this model's family (``""`` if none).
 
@@ -562,6 +585,9 @@ class RuntimeMode:
             edit_line = _edit_format_line(self.model)
             if edit_line:
                 brief = f"{brief}\n{edit_line}"
+            escalation_line = _edit_escalation_line(self.model)
+            if escalation_line:
+                brief = f"{brief}\n{escalation_line}"
             blocks.append(brief)
         workspace = build_coding_workspace_block(self.cwd)
         if workspace:
