@@ -153,40 +153,6 @@ _MAX_FACT_FILE_BYTES = 256 * 1024
 _GIT_TIMEOUT = 2.5
 
 
-# Per-model edit-format steering. Matching the edit tool format to how a model
-# was trained reduces mistakes and wasted reasoning (OpenAI/Codex handle
-# patch-style diffs best; Anthropic models — and most open-weight coding
-# models, whose RL scaffolds use str_replace-style editors — do best with
-# string-replacement). Our `patch` tool exposes both: mode="patch" (V4A
-# multi-file) and mode="replace" (find-and-swap). We nudge each family toward
-# its native format. Unknown families get nothing (the brief's neutral wording
-# stands). Substrings match the model id; aligned with TOOL_USE_ENFORCEMENT_MODELS.
-#
-# GPT/Codex get V4A for ALL edits, single-file included: in codex-rs,
-# apply_patch (V4A — apply_patch.lark) is the ONLY file editor, no
-# str_replace-style tool exists, and the shipped model prompts say to use
-# apply_patch even "for single file edits" — so a replace-mode nudge would
-# steer those models toward a format their first-party harness never taught
-# them.
-_EDIT_FORMAT_GUIDANCE: dict[str, tuple[tuple[str, ...], str]] = {
-    "patch": (
-        ("gpt", "codex"),
-        "- Edit format: author new files with `write_file`; for edits to "
-        "existing code use `patch` with `mode='patch'` (V4A diff) — including "
-        "single-file edits. It's the edit format you handle most reliably.",
-    ),
-    "replace": (
-        ("claude", "sonnet", "opus", "haiku",
-         "gemini", "gemma", "deepseek", "qwen", "kimi", "glm", "grok",
-         "hermes", "llama", "mistral", "devstral", "minimax"),
-        "- Edit format: author new files with `write_file`; for edits to "
-        "existing code prefer `patch` in `mode='replace'` — match a unique "
-        "snippet and swap it. Reach for `mode='patch'` (V4A) only when an edit "
-        "genuinely spans several files at once.",
-    ),
-}
-
-
 def _model_family(model: Optional[str]) -> Optional[str]:
     """Classify a model id into an edit-format family key, or ``None``.
 

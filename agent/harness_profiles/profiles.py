@@ -29,7 +29,7 @@ from agent.prompt_builder import (
     TOOL_USE_ENFORCEMENT_GUIDANCE,
 )
 
-# ── Edit-format guidance lines (verbatim from coding_context._EDIT_FORMAT_GUIDANCE) ──
+# ── Edit-format guidance lines (single source of truth) ─────────────────────
 
 _EDIT_FORMAT_PATCH = (
     "- Edit format: author new files with `write_file`; for edits to "

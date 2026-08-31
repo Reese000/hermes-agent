@@ -158,6 +158,51 @@ class _NeedleVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+class _CollectionNeedleVisitor(ast.NodeVisitor):
+    """AST visitor that finds module-level collection literals (dict, tuple,
+    set, list) containing 2+ known family needles as string constants.
+
+    This catches the class of drift where someone adds a new model-family
+    mapping table (dict of needles→guidance, tuple of needle tuples, etc.)
+    directly in coding_context.py or system_prompt.py instead of adding a
+    profile to agent/harness_profiles/profiles.py.
+    """
+
+    def __init__(self, source: str):
+        self.source = source
+        self.violations: list[tuple[int, str, set[str]]] = []  # (line, repr, matched)
+
+    @staticmethod
+    def _extract_strings(node: ast.AST) -> list[str]:
+        """Recursively extract all string constants from an AST subtree."""
+        strings: list[str] = []
+        for child in ast.walk(node):
+            if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                strings.append(child.value)
+        return strings
+
+    def visit_Module(self, node: ast.Module) -> None:
+        """Only check top-level assignments — skip function/class bodies."""
+        for child in node.body:
+            if not isinstance(child, ast.Assign):
+                continue
+            value = child.value
+            # Check if the value is a collection literal (or a nested one)
+            if not isinstance(value, (ast.Dict, ast.Tuple, ast.Set, ast.List)):
+                continue
+            strings = self._extract_strings(value)
+            matched = {s for s in strings if s in _NEEDLES}
+            if len(matched) >= 2:
+                # Get a short repr for the error message
+                try:
+                    snippet = ast.get_source_segment(self.source, value)
+                    if snippet and len(snippet) > 120:
+                        snippet = snippet[:117] + "..."
+                except Exception:
+                    snippet = f"<line {child.lineno}>"
+                self.violations.append((child.lineno, snippet or f"<line {child.lineno}>", matched))
+
+
 class TestAntiDrift:
     """Assert that model-substring gating is not reintroduced outside the
     registry.
@@ -196,6 +241,37 @@ class TestAntiDrift:
             f"Model-substring gating found in {CODING_CONTEXT_PATH.name}: "
             f"{violations}. Add the needle to agent/harness_profiles/profiles.py "
             f"instead of adding a substring check here."
+        )
+
+    def test_no_stale_model_collections_in_dispatch_files(self):
+        """Module-level collection literals in dispatch files must not contain
+        2+ known family needles as string constants.
+
+        This catches the class of drift where a dict/tuple/set/list mapping
+        model needles to guidance strings is added directly in
+        coding_context.py or system_prompt.py instead of adding a profile to
+        agent/harness_profiles/profiles.py (the single source of truth).
+        """
+        violations: list[str] = []
+        for path in (CODING_CONTEXT_PATH, SYSTEM_PROMPT_PATH):
+            source = path.read_text(encoding="utf-8")
+            try:
+                tree = ast.parse(source, filename=str(path))
+            except SyntaxError:
+                pytest.fail(f"Syntax error in {path}")
+            visitor = _CollectionNeedleVisitor(source)
+            visitor.visit(tree)
+            for line, snippet, matched in visitor.violations:
+                violations.append(
+                    f"  {path.name}:{line}: {snippet}  "
+                    f"contains needles {sorted(matched)}"
+                )
+        assert not violations, (
+            "Module-level collection literals contain model-family needles.\n"
+            "This is dead duplicate data — the single source of truth is "
+            "agent/harness_profiles/profiles.py.\n"
+            "Remove the collection and delegate to resolve_profile() instead.\n"
+            + "\n".join(violations)
         )
 
 
