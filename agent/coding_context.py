@@ -345,6 +345,68 @@ def _coding_instructions(config: Optional[dict[str, Any]]) -> str:
     return str(raw or "").strip()
 
 
+def _agent_cfg_section(config: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """The ``agent`` config section, or ``{}`` when unavailable."""
+    if config is None:
+        try:
+            from hermes_cli.config import load_config_readonly
+
+            config = load_config_readonly()
+        except Exception:
+            return {}
+    section = (config or {}).get("agent", {})
+    return section if isinstance(section, dict) else {}
+
+
+def _repo_map_enabled(config: Optional[dict[str, Any]]) -> bool:
+    """Whether to build the repo map. Default True; any falsey config wins."""
+    try:
+        return bool(_agent_cfg_section(config).get("repo_map", True))
+    except Exception:
+        return True
+
+
+def _repo_map_char_budget(config: Optional[dict[str, Any]]) -> int:
+    """Hard character cap for the repo map. Invalid values fall back."""
+    from agent.repo_map import DEFAULT_CHAR_BUDGET
+
+    try:
+        raw = _agent_cfg_section(config).get(
+            "repo_map_char_budget", DEFAULT_CHAR_BUDGET
+        )
+        value = int(raw)
+    except (TypeError, ValueError, Exception):
+        return DEFAULT_CHAR_BUDGET
+    return value if value >= 0 else DEFAULT_CHAR_BUDGET
+
+
+def build_repo_map_block(
+    cwd: Optional[str | Path],
+    *,
+    enabled: bool = True,
+    char_budget: Optional[int] = None,
+) -> str:
+    """Repo-map system block for *cwd*, or ``""`` when disabled/unavailable.
+
+    Never raises: prompt assembly must not be breakable by a repo scan.
+    """
+    if not enabled:
+        return ""
+    try:
+        from agent.repo_map import DEFAULT_CHAR_BUDGET, build_repo_map
+
+        budget = DEFAULT_CHAR_BUDGET if char_budget is None else char_budget
+        if budget <= 0:
+            return ""
+        resolved = _resolve_cwd(cwd)
+        root = _git_root(resolved) or _marker_root(resolved)
+        if root is None:
+            return ""
+        return build_repo_map(root, char_budget=budget)
+    except Exception:
+        return ""
+
+
 def _resolve_cwd(cwd: Optional[str | Path]) -> Path:
     if cwd:
         return Path(cwd).expanduser()
@@ -454,6 +516,10 @@ class RuntimeMode:
     # Standing operator instructions (``agent.coding_instructions``), appended
     # as an extra stable system block. Empty unless the user configures it.
     instructions: str = ""
+    # Repository-map settings, resolved once from config at construction so
+    # ``system_blocks`` never re-reads config mid-session (cache safety).
+    repo_map_enabled: bool = True
+    repo_map_char_budget: int = 3200
 
     @property
     def kind(self) -> str:
@@ -500,6 +566,13 @@ class RuntimeMode:
         workspace = build_coding_workspace_block(self.cwd)
         if workspace:
             blocks.append(workspace)
+        repo_map = build_repo_map_block(
+            self.cwd,
+            enabled=self.repo_map_enabled,
+            char_budget=self.repo_map_char_budget,
+        )
+        if repo_map:
+            blocks.append(repo_map)
         # Operator instructions ride their own block so the brief (block 0) stays
         # byte-stable and cache-keyed independently of user config.
         if self.instructions:
@@ -557,6 +630,8 @@ def resolve_runtime_mode(
         config_mode=mode,
         model=model,
         instructions=_coding_instructions(config),
+        repo_map_enabled=_repo_map_enabled(config),
+        repo_map_char_budget=_repo_map_char_budget(config),
     )
 
 

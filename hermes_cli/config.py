@@ -1027,6 +1027,17 @@ DEFAULT_CONFIG = {
         #   "off"            — use the generic profile (no model-specific
         #                      guidance, no enforcement, neutral edit format).
         "harness_profile": "auto",
+        # Repository map: a ranked "which symbols live where" block added to
+        # the coding system prompt so the model can navigate without a
+        # scavenger hunt of search calls. See agent/repo_map.py.
+        #   True (default) — build it in the coding posture.
+        #   False          — never build it.
+        # Cache-safe: built once at session start, never re-probed per turn.
+        # Cost is bounded by repo_map_char_budget below (~800 tokens), and by
+        # a wall-clock deadline so session start cannot stall on a huge repo.
+        "repo_map": True,
+        # Hard cap on repo-map characters (~4 chars/token). 0 disables.
+        "repo_map_char_budget": 3200,
         # When verify-on-stop finds edited code without fresh verification
         # evidence, append guidance for creative UI work (avoid broad
         # tsc/lint/test before visual approval) and clean-diff expectations.
