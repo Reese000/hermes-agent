@@ -127,28 +127,6 @@ def _normalize_line_endings(text: str, target: str) -> str:
 _UTF8_BOM = "\ufeff"
 
 
-def _v4a_primary_path(operations) -> str:
-    """The file a failed V4A patch should be escalated against.
-
-    A V4A patch can touch several files, but the failure counter is
-    per-file, so pick one representative: the first UPDATE target, since
-    that is the operation kind that fails on stale context.  ADD and DELETE
-    fail for other reasons (path, permissions) that a format switch will not
-    fix, so they are only used when there is no UPDATE at all.
-    """
-    fallback = ""
-    for op in operations or []:
-        path = getattr(op, "file_path", "") or ""
-        if not path:
-            continue
-        kind = getattr(getattr(op, "operation", None), "name", "") or ""
-        if kind.upper() == "UPDATE":
-            return path
-        if not fallback:
-            fallback = path
-    return fallback
-
-
 def _strip_bom(text: str) -> tuple[str, bool]:
     """Return (text-without-leading-BOM, had_bom).
 
@@ -1534,15 +1512,6 @@ class ShellFileOperations(FileOperations):
                 err_msg += format_no_match_hint(err_msg, match_count, old_string, content)
             except Exception:
                 pass
-            # Escalate the edit format when this file keeps refusing patches
-            # (W4).  Advisory only: a failure here must never mask the real
-            # match error the model needs to see.
-            try:
-                from agent.edit_escalation import record_failure, escalation_hint
-                record_failure(path)
-                err_msg += escalation_hint(path, "replace")
-            except Exception:  # noqa: BLE001
-                pass
             return PatchResult(error=err_msg)
 
         # ── Line-ending preservation ──────────────────────────────────
@@ -1602,13 +1571,6 @@ class ShellFileOperations(FileOperations):
         # agent isn't distracted by problems that were already there.
         lint_result = self._check_lint_delta(path, pre_content=content, post_content=new_content)
 
-        # The edit landed - reset the escalation streak for this file (W4).
-        try:
-            from agent.edit_escalation import record_success
-            record_success(path)
-        except Exception:  # noqa: BLE001
-            pass
-
         return PatchResult(
             success=True,
             diff=diff,
@@ -1651,27 +1613,6 @@ class ShellFileOperations(FileOperations):
         
         # Apply operations
         result = apply_v4a_operations(operations, self)
-
-        # Track per-file edit failures so a file that keeps rejecting patches
-        # gets told to switch format instead of resending (W4).  Advisory:
-        # never let bookkeeping turn a patch result into an exception.
-        try:
-            from agent.edit_escalation import (
-                escalation_hint,
-                record_failure,
-                record_success,
-            )
-            if result.error:
-                target = _v4a_primary_path(operations)
-                if target:
-                    record_failure(target)
-                    result.error += escalation_hint(target, "patch")
-            else:
-                for modified in (result.files_modified or []):
-                    record_success(modified)
-        except Exception:  # noqa: BLE001
-            pass
-
         return result
     
     def _check_lint(self, path: str, content: Optional[str] = None) -> LintResult:

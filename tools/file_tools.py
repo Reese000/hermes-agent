@@ -823,42 +823,52 @@ def _last_known_cwd_for(task_id: str = "default") -> str | None:
 _read_tracker_lock = threading.Lock()
 _read_tracker: dict = {}
 
-# Track consecutive patch failures per (task_id, resolved_path).  Used to
-# escalate the hint when the model repeatedly fails to patch the same file
-# (typical cause: stale view of file contents, ambiguous old_string, or
-# the file was modified externally between the agent's read and patch
-# attempt).  Reset on a successful patch to that path.
-_patch_failure_lock = threading.Lock()
-_patch_failure_tracker: dict = {}  # {task_id: {resolved_path: count}}
+# Consecutive patch failures per (task_id, resolved_path) live in
+# agent.edit_escalation, which owns the counter, the eviction cap, and the
+# escalation text.  What stays here is the classifier deciding which
+# failures are worth counting at all.
+#: Error fragments that mean "the text you sent does not match the file".
+#: Escalation is only useful for these: a permission denial or a missing
+#: file is not fixed by switching edit format, and counting it would push
+#: the model toward write_file for a problem write_file also hits.
+_STALE_CONTENT_MARKERS = (
+    "could not find",          # replace mode, no fuzzy match
+    "not found in",            # V4A hunk context miss
+    "patch validation failed",  # V4A pre-apply check
+    "apply phase failed",       # V4A mid-apply failure
+    "post-write verification",  # wrote, but disk disagrees
+)
+
+
+def _is_stale_content_failure(error_text: str) -> bool:
+    """Whether *error_text* is an edit failure a re-read could fix."""
+    if not error_text:
+        return False
+    lowered = error_text.lower()
+    return any(marker in lowered for marker in _STALE_CONTENT_MARKERS)
 
 
 def _record_patch_failure(task_id: str, resolved_path: str) -> int:
-    """Increment and return the consecutive-failure count for this path."""
-    with _patch_failure_lock:
-        task_failures = _patch_failure_tracker.setdefault(task_id, {})
-        # Cap dict size per task to avoid unbounded growth in long sessions
-        # where the agent fails on many distinct files.  64 distinct
-        # failing files per task is generous; older entries get evicted.
-        if len(task_failures) >= 64 and resolved_path not in task_failures:
-            try:
-                first_key = next(iter(task_failures))
-                del task_failures[first_key]
-            except StopIteration:
-                pass
-        task_failures[resolved_path] = task_failures.get(resolved_path, 0) + 1
-        return task_failures[resolved_path]
+    """Increment and return the consecutive-failure count for this path.
+
+    Delegates to :mod:`agent.edit_escalation`, which owns the counter, the
+    per-scope eviction cap, and the escalation text.  Keeping a second
+    counter here would give the model two nudges disagreeing about how many
+    times it has failed.
+    """
+    from agent.edit_escalation import record_failure
+
+    return record_failure(task_id, resolved_path)
 
 
 def _reset_patch_failures(task_id: str, resolved_paths: list) -> None:
     """Clear consecutive-failure counts for the given paths."""
     if not resolved_paths:
         return
-    with _patch_failure_lock:
-        task_failures = _patch_failure_tracker.get(task_id)
-        if not task_failures:
-            return
-        for rp in resolved_paths:
-            task_failures.pop(rp, None)
+    from agent.edit_escalation import record_success
+
+    for rp in resolved_paths:
+        record_success(task_id, rp)
 
 # Per-task bounds for the containers inside each _read_tracker[task_id].
 # A CLI session uses one stable task_id for its lifetime; without these
@@ -1872,41 +1882,42 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 _reset_patch_failures(task_id, [
                     _r for _r in (_path_to_resolved.get(_p) for _p in _paths_to_check) if _r
                 ])
-        # Hint when old_string not found — saves iterations where the agent
+        # Hint when the edit did not land — saves iterations where the agent
         # retries with stale content instead of re-reading the file.
-        # Suppressed when patch_replace already attached a rich "Did you mean?"
-        # snippet (which is strictly more useful than the generic hint).
-        if result_dict.get("error") and "Could not find" in str(result_dict["error"]):
-            # Track per-file consecutive failures for replace mode.  The
-            # ``path`` arg only exists for replace mode; for V4A patches
-            # we'd need to walk the headers, but in practice V4A failures
-            # are far rarer and the existing _hint covers them adequately.
-            failure_count = 0
+        _err_text = str(result_dict.get("error") or "")
+        if _is_stale_content_failure(_err_text):
+            # Track per-file consecutive failures. Replace mode carries an
+            # explicit ``path``; V4A headers were resolved above.
+            _failed_path = None
             if mode == "replace" and path:
-                resolved = _path_to_resolved.get(path) or path
-                failure_count = _record_patch_failure(task_id, resolved)
+                _failed_path = _path_to_resolved.get(path) or path
+            elif mode == "patch":
+                # V4A headers are already resolved above; escalate against the
+                # first one, since the counter is per file and a multi-file
+                # patch that fails almost always fails on its first target.
+                for _p in _paths_to_check:
+                    _failed_path = _path_to_resolved.get(_p) or _p
+                    if _failed_path:
+                        break
 
-            if failure_count >= 3:
-                # Escalating hint after multiple consecutive failures on the
-                # same path.  Most common cause is a stale view of the file —
-                # the model is retrying with the same old_string against
-                # content that has since changed.  Surface the failure count
-                # so the model recognises it's in a loop and breaks out by
-                # re-reading or falling back to write_file.
-                result_dict["_hint"] = (
-                    f"This is failure #{failure_count} patching {path!r}. "
-                    "Stop retrying with variations of the same old_string. "
-                    "Either: (1) re-read the file fresh to verify current "
-                    "content, (2) use a longer / more unique old_string with "
-                    "surrounding context lines, or (3) use write_file to "
-                    "replace the entire file if the targeted region is hard "
-                    "to anchor."
-                )
-            elif "Did you mean one of these sections?" not in str(result_dict["error"]):
-                result_dict["_hint"] = (
-                    "old_string not found. Use read_file to verify the current "
-                    "content, or search_files to locate the text."
-                )
+            from agent.edit_escalation import ESCALATE_AFTER, escalation_hint
+
+            escalation = ""
+            _attempts = 0
+            if _failed_path:
+                _attempts = _record_patch_failure(task_id, _failed_path)
+                escalation = escalation_hint(task_id, _failed_path, mode)
+
+            # patch_replace may already have attached a "Did you mean one of
+            # these sections?" snippet, which is strictly more useful than
+            # generic first-failure advice. Let it stand alone - but never
+            # suppress the format-switch escalation, which says something the
+            # snippet does not.
+            if escalation and (
+                _attempts >= ESCALATE_AFTER
+                or "Did you mean one of these sections?" not in _err_text
+            ):
+                result_dict["_hint"] = escalation
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
         return tool_error(str(e))
