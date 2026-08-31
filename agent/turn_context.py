@@ -499,6 +499,13 @@ def build_turn_context(
     agent._turn_file_mutation_paths = set()
     agent._verification_stop_nudges = 0
     agent._pre_verify_nudges = 0
+    # Reset per-file LSP error tracking so stale diagnostics never leak
+    # across turns or sessions.
+    try:
+        from agent.verification_stop import reset_lsp_error_tracking
+        reset_lsp_error_tracking()
+    except Exception:  # noqa: BLE001
+        pass
 
     # Record the execution thread so interrupt()/clear_interrupt() can scope
     # the tool-level interrupt signal to THIS agent's thread only.

@@ -515,6 +515,52 @@ def _sync_failover_system_message(agent, api_messages, active_system_prompt):
     return sp
 
 
+def apply_lsp_error_nudge(agent, messages: list, final_msg: dict) -> bool:
+    """Append a synthetic LSP-error nudge to *messages* when errors remain.
+
+    Returns ``True`` when a nudge was issued (the caller must ``continue``
+    the turn loop), ``False`` otherwise.
+
+    Shares the ``_verification_stop_nudges`` counter with verify-on-stop so
+    both nudge kinds draw from a single budget and can never loop forever.
+    Both appended messages are flagged ``_verification_stop_synthetic`` so
+    neither persists into the durable transcript.
+
+    This is a module-level helper rather than inline code so that tests can
+    drive the real production path instead of re-implementing it.
+    """
+    try:
+        from agent.verification_stop import build_lsp_error_nudge
+
+        nudge = build_lsp_error_nudge(
+            attempts=getattr(agent, "_verification_stop_nudges", 0),
+        )
+    except Exception:
+        logger.debug("LSP error nudge check failed", exc_info=True)
+        return False
+
+    if not nudge:
+        return False
+
+    agent._verification_stop_nudges = (
+        getattr(agent, "_verification_stop_nudges", 0) + 1
+    )
+    final_msg["finish_reason"] = "lsp_error_required"
+    final_msg["_verification_stop_synthetic"] = True
+    messages.append(final_msg)
+    messages.append({
+        "role": "user",
+        "content": nudge,
+        "_verification_stop_synthetic": True,
+    })
+    agent._session_messages = messages
+    logger.debug(
+        "LSP error nudge issued (attempt %d)",
+        agent._verification_stop_nudges,
+    )
+    return True
+
+
 def run_conversation(
     agent,
     user_message: str,
@@ -5152,6 +5198,14 @@ def run_conversation(
                     # terminal. Keep a debug breadcrumb in agent.log for tracing.
                     logger.debug("verification stop-loop nudge issued (attempt %d)",
                                  agent._verification_stop_nudges)
+                    continue
+
+                # LSP error nudge: when tracked LSP ERROR diagnostics remain
+                # and the verify-on-stop nudge did NOT fire, nudge the model
+                # to fix them.  The decision + message mutation live in
+                # ``apply_lsp_error_nudge`` so tests exercise the SAME code
+                # production runs (see tests/agent/lsp/test_lsp_nudge_wiring).
+                if apply_lsp_error_nudge(agent, messages, final_msg):
                     continue
 
                 # User verification-loop gate: when the agent edited code this

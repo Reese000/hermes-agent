@@ -1956,6 +1956,16 @@ class ShellFileOperations(FileOperations):
             diagnostics = svc.get_diagnostics_sync(path, delta=True, line_shift=line_shift)
         except Exception:  # noqa: BLE001
             return ""
+        # Record structured diagnostics for the LSP error-nudge gate.
+        # Called BEFORE the early-return on empty so that a file the model
+        # *fixed* (empty diagnostics) clears it from tracking.  Only
+        # reached when feedback_in_loop is True (the gate above returned
+        # early otherwise).
+        try:
+            from agent.verification_stop import record_lsp_diagnostics
+            record_lsp_diagnostics(path, diagnostics)
+        except Exception:  # noqa: BLE001
+            pass
         if not diagnostics:
             return ""
         try:
