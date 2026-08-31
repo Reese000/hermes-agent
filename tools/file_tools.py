@@ -1611,6 +1611,38 @@ def _check_file_staleness(filepath: str, task_id: str) -> str | None:
     return None
 
 
+def _record_edit_outcome(
+    session_id,
+    paths,
+    edit_format: str,
+    status: str,
+    removed_text: str | None = None,
+    added_text: str | None = None,
+) -> None:
+    """Best-effort append to the edit keep-rate ledger (W7).
+
+    Passive by design: the ledger is read by ``/insights``, never by the
+    agent loop, and a failure here must never affect the edit that just
+    happened.
+    """
+    try:
+        from agent.edit_outcomes import record_edit
+
+        for _p in paths or []:
+            if not _p:
+                continue
+            record_edit(
+                session_id=session_id,
+                path=_p,
+                edit_format=edit_format,
+                status=status,
+                removed_text=removed_text,
+                added_text=added_text,
+            )
+    except Exception:
+        logger.debug("edit outcome ledger write failed", exc_info=True)
+
+
 def _mark_verification_stale(
     task_id: str,
     resolved_paths: list[str],
@@ -1687,6 +1719,10 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
                 result_dict["_warning"] = stale_warning
             if not result_dict.get("error"):
                 _mark_verification_stale(task_id, [path], session_id=session_id)
+                _record_edit_outcome(
+                    session_id or task_id, [path], "write_file", "applied",
+                    added_text=content,
+                )
             _update_read_timestamp(path, task_id)
             return json.dumps(result_dict, ensure_ascii=False)
 
@@ -1714,6 +1750,10 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
             if not result_dict.get("error"):
                 result_dict["files_modified"] = [_resolved]
                 _mark_verification_stale(task_id, [_resolved], session_id=session_id)
+                _record_edit_outcome(
+                    session_id or task_id, [_resolved], "write_file", "applied",
+                    added_text=content,
+                )
             # Refresh stamps after the successful write so consecutive
             # writes by this task don't trigger false staleness warnings.
             _update_read_timestamp(path, task_id)
@@ -1882,6 +1922,15 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 _reset_patch_failures(task_id, [
                     _r for _r in (_path_to_resolved.get(_p) for _p in _paths_to_check) if _r
                 ])
+                # Keep-rate ledger (W7). Replace mode knows exactly what it
+                # removed and added; V4A does not expose per-file text here,
+                # so it is recorded without hashes and scored only on the
+                # rates and on later whole-file overwrites.
+                _record_edit_outcome(
+                    session_id or task_id, _resolved_modified, mode, "applied",
+                    removed_text=old_string if mode == "replace" else None,
+                    added_text=new_string if mode == "replace" else None,
+                )
         # Hint when the edit did not land — saves iterations where the agent
         # retries with stale content instead of re-reading the file.
         _err_text = str(result_dict.get("error") or "")
@@ -1918,6 +1967,13 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 or "Did you mean one of these sections?" not in _err_text
             ):
                 result_dict["_hint"] = escalation
+
+            # Keep-rate ledger (W7): a failed edit is as much a signal as a
+            # kept one - it is the denominator of the apply rate.
+            if _failed_path:
+                _record_edit_outcome(
+                    session_id or task_id, [_failed_path], mode, "failed"
+                )
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
         return tool_error(str(e))
