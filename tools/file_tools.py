@@ -1472,6 +1472,13 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
                 "If you are stuck in a loop, stop reading and proceed with writing or responding."
             )
 
+        # Point-of-use context discovery (W6b).  Repetition is already
+        # prevented upstream: an unchanged re-read of the same region
+        # returns the dedup stub and never reaches here.  A read that
+        # does reach here saw new content, which is exactly when a
+        # refreshed view of the file's relationships is worth having.
+        _attach_related_context(result_dict, _resolved, task_id)
+
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
         return tool_error(str(e))
@@ -1641,6 +1648,28 @@ def _record_edit_outcome(
             )
     except Exception:
         logger.debug("edit outcome ledger write failed", exc_info=True)
+
+
+def _attach_related_context(result_dict: dict, resolved_path, task_id: str) -> None:
+    """Attach the point-of-use related-files footer to a read result (W6b).
+
+    Best-effort and silent: a navigation hint must never fail a file read.
+    The footer rides in this per-turn tool result only - it never touches
+    the cached system prompt.
+    """
+    try:
+        from agent.coding_context import _git_root, _marker_root
+        from agent.related_context import related_context
+
+        start = Path(resolved_path).parent
+        root = _git_root(start) or _marker_root(start)
+        if root is None:
+            return
+        footer = related_context(resolved_path, root)
+        if footer:
+            result_dict["_related"] = footer
+    except Exception:
+        logger.debug("related-context footer failed", exc_info=True)
 
 
 def _mark_verification_stale(

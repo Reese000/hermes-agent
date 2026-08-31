@@ -34,10 +34,11 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 # ── Limits ──────────────────────────────────────────────────────────────────
 
@@ -295,6 +296,104 @@ def _top_symbols(
     return [n for _s, n in scored[:limit]]
 
 
+# -- Shared index -----------------------------------------------------------
+
+class RepoIndex(NamedTuple):
+    """One scan of a repository, reusable by every consumer.
+
+    ``per_file`` maps each scanned file to ``(defined, referenced)``; ``df``
+    is the document frequency of every referenced name; ``generic`` is the
+    common-vocabulary set the ranking ignores.
+    """
+
+    root: Path
+    per_file: Dict[Path, Tuple[List[str], List[str]]]
+    df: Counter
+    generic: frozenset
+
+
+#: How long a built index stays reusable.  The index is a navigation aid,
+#: not a source of truth - a symbol that moved five minutes ago costs the
+#: model one extra ``read_file``, whereas rescanning the repo on every read
+#: would cost a full directory walk per tool call.
+INDEX_TTL_S = 300.0
+
+_index_lock = threading.Lock()
+_index_cache: Dict[str, Tuple[float, "RepoIndex"]] = {}
+
+
+def _cache_key(root: Path, max_files: int) -> str:
+    return f"{os.path.normcase(str(root))}|{max_files}"
+
+
+def build_index(
+    root: Optional[str | Path],
+    *,
+    max_files: int = DEFAULT_MAX_FILES,
+    deadline_s: float = DEFAULT_DEADLINE_S,
+    use_cache: bool = True,
+) -> Optional[RepoIndex]:
+    """Scan *root* once and return a :class:`RepoIndex`, or ``None``.
+
+    Results are cached for :data:`INDEX_TTL_S` so the session-start repo map
+    and any later point-of-use lookup share a single walk.  Like every other
+    entry point here, all failure modes return ``None`` rather than raising.
+    """
+    if not root or max_files <= 0:
+        return None
+    try:
+        root_path = Path(root)
+        if not root_path.is_dir():
+            return None
+    except (OSError, ValueError):
+        return None
+
+    # A caller that allows no time at all is asking for no work, not for a
+    # cached answer - honour that, or a warm cache would silently defeat the
+    # deadline that callers use to opt out.
+    if deadline_s <= 0:
+        use_cache = False
+
+    key = _cache_key(root_path, max_files)
+    now = time.monotonic()
+    if use_cache:
+        with _index_lock:
+            hit = _index_cache.get(key)
+            if hit is not None and now - hit[0] < INDEX_TTL_S:
+                return hit[1]
+
+    deadline = now + max(0.0, deadline_s)
+    try:
+        files = _iter_source_files(root_path, max_files=max_files, deadline=deadline)
+    except OSError:
+        return None
+    if not files:
+        return None
+
+    per_file: Dict[Path, Tuple[List[str], List[str]]] = {}
+    for path in files:
+        if time.monotonic() > deadline:
+            break
+        defined, referenced = _extract_symbols(path)
+        if defined:
+            per_file[path] = (defined, referenced)
+    if not per_file:
+        return None
+
+    df, generic = _reference_stats(per_file)
+    index = RepoIndex(root=root_path, per_file=per_file, df=df, generic=generic)
+    if use_cache:
+        with _index_lock:
+            _index_cache[key] = (time.monotonic(), index)
+    return index
+
+
+def clear_index_cache() -> None:
+    """Drop every cached index.  Exists for tests and for explicit resets."""
+    with _index_lock:
+        _index_cache.clear()
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 def build_repo_map(
@@ -324,28 +423,10 @@ def build_repo_map(
     if char_budget <= 0 or max_files <= 0:
         return ""
 
-    deadline = time.monotonic() + max(0.0, deadline_s)
-
-    try:
-        files = _iter_source_files(
-            root_path, max_files=max_files, deadline=deadline
-        )
-    except OSError:
+    index = build_index(root_path, max_files=max_files, deadline_s=deadline_s)
+    if index is None:
         return ""
-    if not files:
-        return ""
-
-    per_file: Dict[Path, Tuple[List[str], List[str]]] = {}
-    for path in files:
-        if time.monotonic() > deadline:
-            break
-        defined, referenced = _extract_symbols(path)
-        if defined:
-            per_file[path] = (defined, referenced)
-    if not per_file:
-        return ""
-
-    df, generic = _reference_stats(per_file)
+    per_file, df, generic = index.per_file, index.df, index.generic
     scores = _rank(per_file, df, generic)
 
     # Deterministic ordering: score desc, then path asc as the tie-break.
