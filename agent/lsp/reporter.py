@@ -5,11 +5,20 @@ diagnostics introduced by the latest edit.  Format matches what
 OpenCode's ``lsp/diagnostic.ts`` and Claude Code's
 ``formatDiagnosticsSummary`` produce — ``<diagnostics>`` blocks with
 1-indexed line/column, capped at ``MAX_PER_FILE`` errors.
+
+Configuration keys (read from ``hermes_cli.config`` via a module-level
+lazy cache so they are fetched at most once per process):
+
+* ``lsp.severities`` — list of ints (1–4), default ``[1]`` (ERROR
+  only).  Controls which severity levels appear in the formatted block.
+* ``lsp.feedback_in_loop`` — bool, default ``True``.  When False the
+  ``<diagnostics>`` block is suppressed from tool output but the LSP
+  service still runs for other consumers.
 """
 from __future__ import annotations
 
 import html
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Severity-1 only by default — warnings/info/hints would flood the
 # agent.  Lift this in config under ``lsp.severities`` if needed.
@@ -18,6 +27,63 @@ DEFAULT_SEVERITIES = frozenset({1})  # ERROR only
 
 MAX_PER_FILE = 20
 MAX_TOTAL_CHARS = 4000
+
+# ── Module-level lazy config cache (populated once, reused on every call) ──
+
+_LSP_CONFIG: Optional[Dict[str, Any]] = None
+
+
+def _load_lsp_config() -> Dict[str, Any]:
+    """Read ``lsp`` section from hermes_cli config (once per process).
+
+    Returns an empty dict on any failure — callers degrade to defaults.
+    """
+    global _LSP_CONFIG
+    if _LSP_CONFIG is not None:
+        return _LSP_CONFIG
+    try:
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly()
+        lsp_cfg = (cfg or {}).get("lsp") if isinstance(cfg, dict) else None
+        _LSP_CONFIG = lsp_cfg if isinstance(lsp_cfg, dict) else {}
+    except Exception:
+        _LSP_CONFIG = {}
+    return _LSP_CONFIG
+
+
+def get_severities() -> frozenset:
+    """Return configured LSP severity filter (validated and coerced).
+
+    Non-int entries and values outside 1–4 are dropped.  Empty lists
+    and invalid values fall back to ``DEFAULT_SEVERITIES``.
+    """
+    cfg = _load_lsp_config()
+    raw = cfg.get("severities", [1])
+    if not isinstance(raw, list) or not raw:
+        return DEFAULT_SEVERITIES
+    validated = set()
+    for v in raw:
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= v <= 4:
+            validated.add(v)
+    return frozenset(validated) if validated else DEFAULT_SEVERITIES
+
+
+def get_feedback_in_loop() -> bool:
+    """Return whether LSP diagnostics feedback is enabled.
+
+    Read from ``lsp.feedback_in_loop`` config key.  Default ``True``.
+    """
+    cfg = _load_lsp_config()
+    raw = cfg.get("feedback_in_loop", True)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(raw)
 
 # Per-field caps for diagnostic content sourced from the language server.
 # These bound the length of any single attacker-controlled identifier that
@@ -86,14 +152,20 @@ def report_for_file(
     file_path: str,
     diagnostics: List[Dict[str, Any]],
     *,
-    severities: frozenset = DEFAULT_SEVERITIES,
+    severities: Optional[frozenset] = None,
     max_per_file: int = MAX_PER_FILE,
 ) -> str:
     """Build a ``<diagnostics file=...>`` block for one file.
 
     Returns an empty string when no diagnostics pass the severity
     filter, so callers can do ``if block:`` to skip empty cases.
+
+    When ``severities`` is ``None`` (the default), the configured
+    severities are read from ``lsp.severities`` in the config (see
+    :func:`get_severities`).
     """
+    if severities is None:
+        severities = get_severities()
     if not diagnostics:
         return ""
     filtered = [d for d in diagnostics if (d.get("severity") or 1) in severities]
@@ -127,4 +199,6 @@ __all__ = [
     "format_diagnostic",
     "report_for_file",
     "truncate",
+    "get_severities",
+    "get_feedback_in_loop",
 ]
