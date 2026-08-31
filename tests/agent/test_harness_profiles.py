@@ -141,20 +141,43 @@ _NEEDLES = frozenset({
 class _NeedleVisitor(ast.NodeVisitor):
     """AST visitor that finds ``"needle" in model_lower`` patterns in
     ``if``-test / ``Compare`` nodes, but ignores docstrings and comments.
+
+    Catches both forms:
+      - ``"needle" in variable``  (needle on LEFT — node.left)
+      - ``variable in ("needle", ...)``  (needle on RIGHT — node.comparators)
     """
 
-    def __init__(self, source_lines: list[str]):
+    # Lines exempted from anti-drift enforcement because they are legitimate
+    # fallback paths for code that bypasses agent_init.  Each entry is
+    # (filepath_stem, line_number) — the stem avoids coupling to OS paths.
+    _EXEMPT_LINES: dict[str, set[int]] = {
+        "system_prompt": {265, 267},
+    }
+
+    def __init__(self, source_lines: list[str], file_stem: str):
         self.source_lines = source_lines
+        self.file_stem = file_stem
         self.violations: list[tuple[int, str, str]] = []  # (line, needle, file)
 
+    def _is_exempt(self, lineno: int) -> bool:
+        return lineno in self._EXEMPT_LINES.get(self.file_stem, set())
+
     def visit_Compare(self, node: ast.Compare) -> None:
-        # Look for ``"needle" in <target>`` patterns
-        for op, comparator in zip(node.ops, node.comparators):
-            if isinstance(op, ast.In):
+        for i, (op, comparator) in enumerate(zip(node.ops, node.comparators)):
+            if isinstance(op, (ast.In, ast.NotIn)):
+                # Form 1: ``"needle" in <target>`` — needle is on the LEFT
+                if (isinstance(node.left, ast.Constant)
+                        and isinstance(node.left.value, str)
+                        and node.left.value in _NEEDLES):
+                    if not self._is_exempt(node.lineno):
+                        self.violations.append((node.lineno, node.left.value, ""))
+
+                # Form 2: ``<target> in ("needle", ...)`` — needles in comparators
                 for child in ast.walk(comparator):
                     if isinstance(child, ast.Constant) and isinstance(child.value, str):
                         if child.value in _NEEDLES:
-                            self.violations.append((node.lineno, child.value, ""))
+                            if not self._is_exempt(node.lineno):
+                                self.violations.append((node.lineno, child.value, ""))
         self.generic_visit(node)
 
 
@@ -223,7 +246,7 @@ class TestAntiDrift:
         except SyntaxError:
             pytest.fail(f"Syntax error in {path}")
 
-        visitor = _NeedleVisitor(lines)
+        visitor = _NeedleVisitor(lines, file_stem=path.stem)
         visitor.visit(tree)
         return [(line, needle) for line, needle, _ in visitor.violations]
 
