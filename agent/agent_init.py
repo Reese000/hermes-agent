@@ -1434,6 +1434,23 @@ def init_agent(
         _agent_section = {}
     agent._tool_use_enforcement = _agent_section.get("tool_use_enforcement", "auto")
 
+    # Harness profile: resolved once at session start from the model id.
+    # "auto" (default) — resolve from model id via agent.harness_profiles.
+    # "<profile name>" — force a specific profile (e.g. "mimo", "openai").
+    # "off" — use the generic profile (no model-specific guidance).
+    # This is the single resolution point — nothing re-resolves per turn.
+    from agent.harness_profiles import resolve_profile, get_profile_by_name, GENERIC_PROFILE
+    _hp_cfg = str(_agent_section.get("harness_profile", "auto")).strip().lower()
+    if _hp_cfg == "off":
+        agent._harness_profile = GENERIC_PROFILE
+    elif _hp_cfg == "auto":
+        agent._harness_profile = resolve_profile(agent.model, provider=agent.provider)
+    else:
+        agent._harness_profile = get_profile_by_name(_hp_cfg)
+        if agent._harness_profile.name == "generic" and _hp_cfg != "generic":
+            # Unknown profile name — fall back to auto-resolution
+            agent._harness_profile = resolve_profile(agent.model, provider=agent.provider)
+
     # Intent-ack continuation config: "auto" (default — codex_responses only,
     # the historical gate), true (all api_modes), false (never), or a list of
     # model-name substrings.  Resolved against the active api_mode/model in the

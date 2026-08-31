@@ -1017,6 +1017,16 @@ DEFAULT_CONFIG = {
         # approve. Clean the diff before you commit and push." Cache-safe:
         # takes effect next session. Empty by default.
         "coding_instructions": "",
+        # Harness profile: controls per-model-family prompt customisation
+        # (edit format, execution guidance, tool-use enforcement, role).
+        # See agent/harness_profiles/profiles.py.
+        #   "auto" (default) — resolve from model id at session start.
+        #   "<profile name>" — force a specific profile (e.g. "mimo",
+        #                      "openai", "anthropic").  Unknown names
+        #                      fall back to auto-resolution.
+        #   "off"            — use the generic profile (no model-specific
+        #                      guidance, no enforcement, neutral edit format).
+        "harness_profile": "auto",
         # When verify-on-stop finds edited code without fresh verification
         # evidence, append guidance for creative UI work (avoid broad
         # tsc/lint/test before visual approval) and clean-diff expectations.
@@ -3034,6 +3044,18 @@ DEFAULT_CONFIG = {
         # ``"manual"`` — only use binaries already on PATH.
         # ``"off"`` — alias for ``manual``.
         "install_strategy": "auto",
+
+        # LSP diagnostic severities surfaced to the model.
+        # Values: 1=ERROR, 2=WARN, 3=INFO, 4=HINT.
+        # Default ERROR-only.  The reporter's docstring already promises
+        # this key; consumers in agent/lsp/ read it to filter diagnostics.
+        "severities": [1],
+
+        # Whether diagnostics introduced by an edit are appended to the
+        # edit tool's result the model sees.  Default True — the model
+        # gets immediate feedback on breakage.  Set False to suppress
+        # (e.g. when LSP diagnostics are noisy for a language).
+        "feedback_in_loop": True,
 
         # Per-server overrides.  Each key is a server_id from the
         # registry (``pyright``, ``typescript``, ``gopls``,

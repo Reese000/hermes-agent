@@ -190,25 +190,28 @@ _EDIT_FORMAT_GUIDANCE: dict[str, tuple[tuple[str, ...], str]] = {
 def _model_family(model: Optional[str]) -> Optional[str]:
     """Classify a model id into an edit-format family key, or ``None``.
 
-    Used to steer the coding posture toward the edit tool format a model was
-    trained on. Family-agnostic by design: an unrecognised model gets ``None``
-    and the operating brief's neutral edit wording applies.
+    Delegates to :func:`agent.harness_profiles.resolve_profile` for
+    longest-needle-wins resolution.  Returns the profile's ``edit_format``
+    (``"patch"`` or ``"replace"``) when a profile matches, or ``None`` for
+    unknown models (which get the generic profile with an empty
+    ``edit_format_line``).
     """
-    if not model:
+    from agent.harness_profiles import resolve_profile
+
+    profile = resolve_profile(model)
+    if profile.name == "generic" and not profile.edit_format_line:
         return None
-    lowered = model.lower()
-    for family, (needles, _line) in _EDIT_FORMAT_GUIDANCE.items():
-        if any(n in lowered for n in needles):
-            return family
-    return None
+    return profile.edit_format
 
 
 def _edit_format_line(model: Optional[str]) -> str:
-    """The edit-format guidance line for this model's family (``""`` if none)."""
-    family = _model_family(model)
-    if family is None:
-        return ""
-    return _EDIT_FORMAT_GUIDANCE[family][1]
+    """The edit-format guidance line for this model's family (``""`` if none).
+
+    Delegates to :func:`agent.harness_profiles.resolve_profile`.
+    """
+    from agent.harness_profiles import resolve_profile
+
+    return resolve_profile(model).edit_format_line
 
 
 # Operating brief for the coding posture. Tool names referenced here (read_file,

@@ -224,7 +224,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # Tool-use enforcement: tells the model to actually call tools instead
     # of describing intended actions.  Controlled by config.yaml
     # agent.tool_use_enforcement:
-    #   "auto" (default) — matches TOOL_USE_ENFORCEMENT_MODELS
+    #   "auto" (default) — delegates to the harness profile's
+    #                      tool_use_enforcement field (see agent/harness_profiles)
     #   true  — always inject (all models)
     #   false — never inject
     #   list  — custom model-name substrings to match
@@ -239,23 +240,32 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             model_lower = (agent.model or "").lower()
             _inject = any(p.lower() in model_lower for p in _enforce if isinstance(p, str))
         else:
-            # "auto" or any unrecognised value — use hardcoded defaults
-            model_lower = (agent.model or "").lower()
-            _inject = any(p in model_lower for p in TOOL_USE_ENFORCEMENT_MODELS)
+            # "auto" or any unrecognised value — delegate to the harness
+            # profile resolved at session start (see agent/agent_init.py).
+            _hp = getattr(agent, "_harness_profile", None)
+            if _hp is not None:
+                _inject = _hp.tool_use_enforcement
+            else:
+                # Fallback for code paths that bypass agent_init (rare).
+                from agent.prompt_builder import TOOL_USE_ENFORCEMENT_MODELS
+                model_lower = (agent.model or "").lower()
+                _inject = any(p in model_lower for p in TOOL_USE_ENFORCEMENT_MODELS)
         if _inject:
             stable_parts.append(TOOL_USE_ENFORCEMENT_GUIDANCE)
-            _model_lower = (agent.model or "").lower()
-            # Google model operational guidance (conciseness, absolute
-            # paths, parallel tool calls, verify-before-edit, etc.)
-            if "gemini" in _model_lower or "gemma" in _model_lower:
-                stable_parts.append(GOOGLE_MODEL_OPERATIONAL_GUIDANCE)
-            # OpenAI GPT/Codex execution discipline (tool persistence,
-            # prerequisite checks, verification, anti-hallucination).
-            # Also applied to xAI Grok — same failure modes (claims completion
-            # without tool calls, suggests workarounds instead of using
-            # existing tools, replies with plans instead of executing).
-            if "gpt" in _model_lower or "codex" in _model_lower or "grok" in _model_lower:
-                stable_parts.append(OPENAI_MODEL_EXECUTION_GUIDANCE)
+            # Execution guidance — delegated to the harness profile instead
+            # of inline substring matching.  Each profile carries its own
+            # execution_guidance string (OpenAI, Google, MiMo, or empty).
+            _hp = getattr(agent, "_harness_profile", None)
+            if _hp is not None and _hp.execution_guidance:
+                stable_parts.append(_hp.execution_guidance)
+            else:
+                # Fallback: inline substring matching for code paths that
+                # bypass agent_init.
+                _model_lower = (agent.model or "").lower()
+                if "gemini" in _model_lower or "gemma" in _model_lower:
+                    stable_parts.append(GOOGLE_MODEL_OPERATIONAL_GUIDANCE)
+                if "gpt" in _model_lower or "codex" in _model_lower or "grok" in _model_lower:
+                    stable_parts.append(OPENAI_MODEL_EXECUTION_GUIDANCE)
 
     has_skills_tools = any(name in agent.valid_tool_names for name in ['skills_list', 'skill_view', 'skill_manage'])
     if has_skills_tools:
