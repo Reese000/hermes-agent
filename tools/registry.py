@@ -518,7 +518,13 @@ class ToolRegistry:
     # Schema retrieval
     # ------------------------------------------------------------------
 
-    def get_definitions(self, tool_names: Set[str], quiet: bool = False) -> List[dict]:
+    def get_definitions(
+        self,
+        tool_names: Set[str],
+        quiet: bool = False,
+        tool_description_overrides: Optional[Dict[str, str]] = None,
+        tool_description_appends: Optional[Dict[str, str]] = None,
+    ) -> List[dict]:
         """Return OpenAI-format tool schemas for the requested tool names.
 
         Only tools whose ``check_fn()`` returns True (or have no check_fn)
@@ -564,6 +570,25 @@ class ToolRegistry:
                         "using static schema",
                         name, exc,
                     )
+            # Per-model description override (harness profile, W2).  Only the
+            # ``description`` field is replaced — parameters/name are never
+            # touched, so a bad override cannot change the tool contract.
+            # ``None``/empty leaves the schema byte-identical to the default.
+            if tool_description_overrides:
+                override = tool_description_overrides.get(name)
+                if isinstance(override, str) and override.strip():
+                    schema_with_name["description"] = override
+
+            # Append channel — strictly additive, so a profile can nudge the
+            # model without any risk of dropping the tool's real contract.
+            # Applied after replacement so both can target the same tool.
+            if tool_description_appends:
+                addendum = tool_description_appends.get(name)
+                if isinstance(addendum, str) and addendum.strip():
+                    schema_with_name["description"] = (
+                        schema_with_name.get("description", "") + addendum
+                    )
+
             result.append({"type": "function", "function": schema_with_name})
         return result
 

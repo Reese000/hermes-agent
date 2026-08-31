@@ -1451,6 +1451,34 @@ def init_agent(
             # Unknown profile name — fall back to auto-resolution
             agent._harness_profile = resolve_profile(agent.model, provider=agent.provider)
 
+    # Per-model tool descriptions (W2).  The profile resolves *after* the
+    # initial agent.tools build (which needs config that is loaded later), so
+    # re-materialise the schemas here when — and only when — this profile
+    # actually overrides something.  For every profile with no overrides this
+    # branch never runs and agent.tools is untouched, so the default output
+    # stays byte-identical.
+    #
+    # Cache-safety: the profile is resolved exactly once per session (above),
+    # so the descriptions the model sees are fixed for the whole conversation
+    # even across a mid-conversation model failover.  Nothing here re-runs
+    # per turn, so the cached prompt prefix is never invalidated.
+    if getattr(agent._harness_profile, "tool_description_overrides", None) or getattr(
+        agent._harness_profile, "tool_description_appends", None
+    ):
+        try:
+            agent.tools = _ra().get_tool_definitions(
+                enabled_toolsets=enabled_toolsets,
+                disabled_toolsets=disabled_toolsets,
+                quiet_mode=agent.quiet_mode,
+                harness_profile=agent._harness_profile,
+            )
+        except Exception:
+            logger.debug(
+                "per-model tool description override failed; "
+                "keeping default schemas",
+                exc_info=True,
+            )
+
     # Intent-ack continuation config: "auto" (default — codex_responses only,
     # the historical gate), true (all api_modes), false (never), or a list of
     # model-name substrings.  Resolved against the active api_mode/model in the

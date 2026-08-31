@@ -71,7 +71,8 @@ class HarnessProfile:
       * ``role_model``     — ``"system"`` or ``"developer"``
 
     Fields consumed by later workstreams (W2/W4):
-      * ``tool_description_overrides`` — per-tool description overrides (W2)
+      * ``tool_description_overrides`` — per-tool description replacement (W2)
+      * ``tool_description_appends`` — per-tool description addendum (W2, preferred)
       * ``retry_format_chain`` — retry format escalation chain (W4)
     """
 
@@ -84,6 +85,11 @@ class HarnessProfile:
     role_model: Literal["system", "developer"] = "system"
     verbosity_hint: str = ""
     tool_description_overrides: dict[str, str] = field(default_factory=dict)
+    # Safer sibling of ``tool_description_overrides``: the text is APPENDED to
+    # the tool's existing description instead of replacing it, so a profile
+    # can add a model-specific nudge without any risk of dropping the tool's
+    # real contract (parameters, semantics, safety notes).  Prefer this.
+    tool_description_appends: dict[str, str] = field(default_factory=dict)
     retry_format_chain: tuple[str, ...] = ()
 
 
@@ -194,6 +200,17 @@ MIMO_PROFILE = HarnessProfile(
     edit_format_line=_EDIT_FORMAT_REPLACE,
     execution_guidance=MIMO_EXECUTION_GUIDANCE,
     tool_use_enforcement=True,
+    # Point-of-use reinforcement. This restates a rule already present in
+    # MIMO_EXECUTION_GUIDANCE ("If a patch fails, re-read the file before
+    # retrying") at the place the model actually decides to call the tool —
+    # the Cursor/Aider pattern of putting guidance where it is acted on.
+    # Appended, never replacing, so the tool contract is untouched.
+    tool_description_appends={
+        "patch": (
+            "\n\nIf a patch fails to apply, re-read the file before "
+            "retrying - do not resend the same patch."
+        ),
+    },
 )
 
 GENERIC_PROFILE = HarnessProfile(
