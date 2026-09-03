@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 from utils import safe_json_loads
@@ -130,10 +130,22 @@ class ToolCallGuardrailConfig:
     loop_caps: "LoopCapConfig" = field(default_factory=lambda: LoopCapConfig())
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "ToolCallGuardrailConfig":
-        """Build config from the `tool_loop_guardrails` config.yaml section."""
+    def from_mapping(
+        cls,
+        data: Mapping[str, Any] | None,
+        *,
+        continuous_work: bool = False,
+    ) -> "ToolCallGuardrailConfig":
+        """Build config from the `tool_loop_guardrails` config.yaml section.
+
+        ``continuous_work`` (agent.continuous_work) tightens the warning
+        thresholds so a runaway "keep working" loop surfaces sooner instead of
+        silently burning budget: exact_failure 2→1, same_tool_failure 3→2,
+        idempotent_no_progress 2→1. Hard-stop thresholds and loop caps are
+        untouched.
+        """
         if not isinstance(data, Mapping):
-            return cls()
+            data = {}
 
         warn_after = data.get("warn_after")
         if not isinstance(warn_after, Mapping):
@@ -143,7 +155,7 @@ class ToolCallGuardrailConfig:
             hard_stop_after = {}
 
         defaults = cls()
-        return cls(
+        config = cls(
             warnings_enabled=_as_bool(data.get("warnings_enabled"), defaults.warnings_enabled),
             hard_stop_enabled=_as_bool(data.get("hard_stop_enabled"), defaults.hard_stop_enabled),
             exact_failure_warn_after=_positive_int(
@@ -172,6 +184,16 @@ class ToolCallGuardrailConfig:
             ),
             loop_caps=LoopCapConfig.from_mapping(data.get("loop_caps")),
         )
+
+        if continuous_work:
+            config = replace(
+                config,
+                exact_failure_warn_after=1,
+                same_tool_failure_warn_after=2,
+                no_progress_warn_after=1,
+            )
+
+        return config
 
 
 # Default session-wide caps, matching Claude Code's v2.1.212 runaway-loop

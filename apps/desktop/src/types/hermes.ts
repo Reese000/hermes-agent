@@ -1556,3 +1556,7 @@ export interface SessionUsageResponse {
   reasoning_tokens: number
   tokens_per_second: number
 }
+
+export interface ContinuousWorkResponse {
+  enabled: boolean
+}

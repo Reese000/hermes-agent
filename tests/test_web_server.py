@@ -338,3 +338,41 @@ def test_start_server_treats_windows_fallback_keyboardinterrupt_as_clean_shutdow
             "start_server must treat serve-time KeyboardInterrupt as a clean "
             "shutdown on the Windows pre-0.36 fallback, not propagate it"
         )
+
+
+def test_continuous_work_endpoints_roundtrip(monkeypatch):
+    """GET/POST /api/agent/continuous-work read and write agent.continuous_work.
+
+    The handlers are exercised directly with the profile scope and config I/O
+    stubbed, so the assertion covers the actual read/write behaviour (not the
+    config backend's file handling).
+    """
+    monkeypatch.setattr(
+        web_server, "_config_profile_scope", lambda profile: contextlib.nullcontext()
+    )
+    state: dict = {"agent": {}}
+    monkeypatch.setattr(web_server, "load_config", lambda: state)
+    written: dict = {}
+    monkeypatch.setattr(web_server, "save_config", lambda cfg: written.update(cfg))
+
+    # Default reads False when the key is absent.
+    assert web_server.get_continuous_work() == {"continuous_work": False}
+
+    # POST persists the toggle and reports the new value.
+    assert web_server.set_continuous_work({"enabled": True}) == {
+        "continuous_work": True,
+        "ok": True,
+    }
+    assert state["agent"]["continuous_work"] is True
+    assert written["agent"]["continuous_work"] is True
+
+    # GET reflects the written value.
+    assert web_server.get_continuous_work() == {"continuous_work": True}
+
+    # POST back to False clears it.
+    assert web_server.set_continuous_work({"enabled": False}) == {
+        "continuous_work": False,
+        "ok": True,
+    }
+    assert state["agent"]["continuous_work"] is False
+    assert web_server.get_continuous_work() == {"continuous_work": False}

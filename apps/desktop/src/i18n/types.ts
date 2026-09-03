@@ -2096,6 +2096,9 @@ export interface Translations {
     enhanceFailed: string
     enhanceRateLimited: string
     enhanceTooLong: string
+    continuousWork: string
+    continuousWorkActive: string
+    continuousWorkOff: string
     mcpSuggestions: {
       label: (server: string) => string
       tip: (keyword: string) => string

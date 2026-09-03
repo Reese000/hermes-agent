@@ -128,6 +128,13 @@ export function setModelAssignment(
   })
 }
 
+export function searchProviderModels(provider: string, query: string): Promise<{ models: string[] }> {
+  return window.hermesDesktop.api<{ models: string[] }>({
+    ...profileScoped(),
+    path: `/api/model/search?${new URLSearchParams({ q: query, provider }).toString()}`
+  })
+}
+
 export interface EnhancePromptResponse {
   enhanced: string
   ok: boolean
@@ -137,15 +144,13 @@ export interface EnhancePromptResponse {
 export function enhancePrompt(
   text: string,
   sessionId?: string | null,
-  profile?: string | null,
-  signal?: AbortSignal
+  profile?: string | null
 ): Promise<EnhancePromptResponse> {
   return window.hermesDesktop.api<EnhancePromptResponse>({
     ...profileScoped(),
     path: '/api/model/enhance-prompt',
     method: 'POST',
     body: { prompt: text, session_id: sessionId || undefined, profile: profile || undefined },
-    signal,
     timeoutMs: 300_000
   })
 }
@@ -158,7 +163,7 @@ export async function* enhancePromptStream(
   signal?: AbortSignal
 ): AsyncGenerator<string, void, unknown> {
   if (!window.hermesDesktop?.apiStream) {
-    const res = await enhancePrompt(text, sessionId, profile, signal)
+    const res = await enhancePrompt(text, sessionId, profile)
     if (res.ok && res.enhanced) {
       yield res.enhanced
     }
@@ -223,8 +228,8 @@ export async function* enhancePromptStream(
         yield chunks.shift()!
       }
     }
-    if (donePayload && !donePayload.ok) {
-      throw new Error(donePayload.error || 'Enhance failed')
+    if (donePayload && !(donePayload as { ok: boolean }).ok) {
+      throw new Error((donePayload as { error?: string }).error || 'Enhance failed')
     }
   } finally {
     signal?.removeEventListener('abort', abortHandler)

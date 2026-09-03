@@ -7692,7 +7692,7 @@ def set_moa_models(body: MoaConfigPayload, profile: Optional[str] = None):
 
 # ── Prompt Enhancement ────────────────────────────────────────────────────
 _enhance_prompt_last_call: dict = {}
-_ENHANCE_PROMPT_MIN_INTERVAL = 0.0
+_ENHANCE_PROMPT_MIN_INTERVAL = 2.0
 _ENHANCE_PROMPT_DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
 _ENHANCE_PROMPT_DEFAULT_PROVIDER = "openrouter"
 _ENHANCE_PROMPT_MAX_INPUT = 999999
@@ -7825,8 +7825,47 @@ def _build_main_runtime_from_config() -> Optional[dict]:
     return runtime or None
 
 
+def _sanitize_enhanced_output(enhanced: str, original: str) -> str:
+    """Strip common LLM wrapper text that models sometimes add despite instructions.
+
+    Handles patterns like:
+      - "Here's the enhanced prompt: ..."
+      - "Enhanced: ..."
+      - "```...```" code fences around plain text
+      - Quoted output ('"' or '"…"' wrapping)
+    """
+    import re
+
+    text = enhanced.strip()
+
+    # Strip code fences the model sometimes wraps output in
+    if text.startswith("```") and text.endswith("```"):
+        text = re.sub(r"^```\w*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+        text = text.strip()
+
+    # Strip common wrapper prefixes
+    wrapper_patterns = [
+        r"^(?:here(?:'s| is) (?:the )?(?:enhanced|refined|improved|rewritten)(?:\s+prompt)?\s*[:\-]\s*)",
+        r"^(?:enhanced(?:\s+prompt)?\s*[:\-]\s*)",
+        r"^(?:refined(?:\s+prompt)?\s*[:\-]\s*)",
+        r"^(?:improved(?:\s+prompt)?\s*[:\-]\s*)",
+        r"^(?:rewritten(?:\s+prompt)?\s*[:\-]\s*)",
+    ]
+    for pat in wrapper_patterns:
+        text = re.sub(pat, "", text, flags=re.IGNORECASE).strip()
+
+    # Strip surrounding quotes if the entire output is quoted
+    if len(text) > 2:
+        if (text.startswith('"') and text.endswith('"')) or \
+           (text.startswith('\u201c') and text.endswith('\u201d')):
+            text = text[1:-1].strip()
+
+    return text if text else original
+
+
 @app.post("/api/model/enhance-prompt")
-async def enhance_prompt(body: dict, profile: Optional[str] = None):
+async def enhance_prompt(body: dict):
     """Rewrite the user's prompt for clarity and effectiveness (non-streaming)."""
     text = str(body.get("prompt", "") or "").strip()
     session_id = str(body.get("session_id", "") or "").strip() or None
@@ -7851,7 +7890,7 @@ async def enhance_prompt(body: dict, profile: Optional[str] = None):
         return {"enhanced": text, "ok": False, "error": "text_too_long"}
 
     try:
-        mesgs, provider_kw, model_kw, main_runtime, max_tokens = _build_enhance_context(text, session_id, body.get("profile", "") or "balanced")
+        mesgs, provider_kw, model_kw, main_runtime, max_tokens, temperature = _build_enhance_context(text, session_id, body.get("profile", "") or "balanced")
     except Exception as exc:
         return {"enhanced": text, "ok": False, "error": str(exc)[:200]}
 
@@ -7859,12 +7898,13 @@ async def enhance_prompt(body: dict, profile: Optional[str] = None):
         from agent.auxiliary_client import call_llm
         resp = call_llm(
             task="prompt_enhance", **provider_kw, **model_kw,
-            messages=mesgs, temperature=0.3, max_tokens=max_tokens,
+            messages=mesgs, temperature=temperature, max_tokens=max_tokens,
             timeout=300, main_runtime=main_runtime,
         )
         enhanced = (resp.choices[0].message.content or "").strip()
         if not enhanced:
             return {"enhanced": text, "ok": False, "error": "empty_response"}
+        enhanced = _sanitize_enhanced_output(enhanced, text)
         return {"enhanced": enhanced, "ok": True}
     except Exception as exc:
         _log.debug("prompt_enhance: aux call failed", exc_info=True)
@@ -7877,8 +7917,6 @@ def _build_enhance_context(text: str, session_id: Optional[str], profile: str = 
     _et0 = _et.monotonic()
 
     context_block = ""
-    project_ctx = ""
-    project_dir = ""
     system_prompt_suffix = ""
 
     if session_id:
@@ -7890,14 +7928,16 @@ def _build_enhance_context(text: str, session_id: Optional[str], profile: str = 
                 if sid:
                     session = db.get_session(sid)
                     if session:
-                        cwd = str(session.get("cwd", "") or "")
-                        git_root = str(session.get("git_repo_root", "") or "")
-                        project_dir = git_root or cwd
                         sys_prompt = str(session.get("system_prompt", "") or "")
                         if sys_prompt and len(sys_prompt) > 50:
-                            sp_block = sys_prompt
+                            # Trim to key context — full prompt can be 10K+ tokens
+                            # of irrelevant agent instructions. Keep first 2000 chars
+                            # which covers project rules, conventions, and memory.
+                            trimmed = sys_prompt[:2000]
+                            if len(sys_prompt) > 2000:
+                                trimmed += "…"
                             system_prompt_suffix = (
-                                "Agent system prompt (memory/rules):\n" + sp_block
+                                "Agent system prompt (memory/rules):\n" + trimmed
                             )
                     conv = db.get_messages_as_conversation(sid, repair_alternation=True)
                     if conv and len(conv) > 2:
@@ -7910,15 +7950,16 @@ def _build_enhance_context(text: str, session_id: Optional[str], profile: str = 
                             content = str(m.get("content", "") or "")
                             if not content.strip():
                                 continue
-                            if len(content) > 300:
-                                content = content[:2000] if len(content) > 2000 else content
+                            # Truncate long messages to keep context bounded
+                            if len(content) > 500:
+                                content = content[:500] + "…"
                             lines.append(f"[{role}]: {content}")
                         if lines:
                             context_block = "Recent conversation:\n" + "\n".join(lines)
             finally:
                 db.close()
         except Exception:
-            pass
+            _log.debug("[enhance] context gathering failed", exc_info=True)
 
     _et1 = _et.monotonic()
     _log.warning(f"[enhance-timing] context_gather={(_et1-_et0)*1000:.0f}ms")
@@ -7929,9 +7970,17 @@ def _build_enhance_context(text: str, session_id: Optional[str], profile: str = 
 
     profile_prompts = {
         "syntax": (
-            "Focus ONLY on code syntax, structure, and technical precision. "
-            "Preserve the user's exact intent. Add file paths, function names, "
-            "and type signatures where missing. Never add context or explanation."
+            "You are a SYNTAX-ONLY editor. Your job is to fix code-related "
+            "technical errors in the prompt — broken syntax, wrong function "
+            "names, missing imports, incorrect type signatures. "
+            "STRICT RULES:\n"
+            "• Do NOT rephrase, reword, or restructure any part of the prompt.\n"
+            "• Do NOT add context, explanations, constraints, or new information.\n"
+            "• Do NOT change the user's wording, tone, or sentence structure.\n"
+            "• ONLY fix: misspelled identifiers, broken code syntax, wrong paths.\n"
+            "• If the prompt has no syntax errors, return it EXACTLY as-is.\n"
+            "• The output must be indistinguishable from the original except for "
+            "the specific syntax corrections you made."
         ),
         "minimal": (
             "Make the smallest changes needed to make the prompt clearer. "
@@ -7954,15 +8003,29 @@ def _build_enhance_context(text: str, session_id: Optional[str], profile: str = 
         ),
     }
 
-    system_parts = [
-        "You refine prompts for an AI agent. Rules:",
-        "• Output ONLY the refined prompt text — no explanation, no wrapper.",
-        "• Preserve the user's voice: terse → terse, specific → specific.",
-        "• Never add politeness, hedges, questions, or padding.",
-        "• Use exact terms from conversation context.",
-        "• Name files, functions, configs, and commands explicitly.",
-        profile_prompts.get(enhance_profile, profile_prompts["balanced"]),
-    ]
+    # ── Build profile-aware system prompt ──────────────────────────────
+    # Syntax mode gets a completely different base prompt that forbids
+    # rewording. Other profiles share the standard refinement base.
+    if enhance_profile == "syntax":
+        system_parts = [
+            "You are a syntax correction tool — NOT a prompt rewriter.",
+            "• Output ONLY the corrected prompt text — no explanation, no wrapper.",
+            "• Do NOT rephrase, reword, or restructure sentences.",
+            "• Do NOT add new information, context, or constraints.",
+            "• ONLY correct: misspelled code identifiers, broken syntax, wrong file paths.",
+            "• If there are no syntax errors, return the text UNCHANGED.",
+            profile_prompts["syntax"],
+        ]
+    else:
+        system_parts = [
+            "You refine prompts for an AI agent. Rules:",
+            "• Output ONLY the refined prompt text — no explanation, no wrapper.",
+            "• Preserve the user's voice: terse → terse, specific → specific.",
+            "• Never add politeness, hedges, questions, or padding.",
+            "• Use exact terms from conversation context.",
+            "• Name files, functions, configs, and commands explicitly.",
+            profile_prompts.get(enhance_profile, profile_prompts["balanced"]),
+        ]
 
     if is_empty:
         system_parts.insert(0, "User submitted EMPTY prompt. Generate next logical request from context.\n")
@@ -8002,15 +8065,26 @@ def _build_enhance_context(text: str, session_id: Optional[str], profile: str = 
     if not provider_kw:
         provider_kw["provider"] = _ENHANCE_PROMPT_DEFAULT_PROVIDER
 
-    max_tokens = min(max(len(text) * 3, 2000), 8000)
+    # Profile-specific settings: temperature and max_tokens multiplier
+    # Syntax mode needs near-deterministic output and few tokens (just fixes).
+    # Maximum mode needs more tokens for added context/constraints.
+    profile_config = {
+        "syntax":   {"temperature": 0.05, "token_multiplier": 1.2, "min_tokens": 500},
+        "minimal":  {"temperature": 0.2,  "token_multiplier": 1.5, "min_tokens": 1000},
+        "balanced": {"temperature": 0.3,  "token_multiplier": 2.0, "min_tokens": 2000},
+        "maximum":  {"temperature": 0.4,  "token_multiplier": 3.0, "min_tokens": 3000},
+    }
+    pcfg = profile_config.get(enhance_profile, profile_config["balanced"])
+    temperature = pcfg["temperature"]
+    max_tokens = min(max(int(len(text) * pcfg["token_multiplier"]), pcfg["min_tokens"]), 8000)
 
     _et2 = _et.monotonic()
     _log.warning(f"[enhance-timing] prompt_build={(_et2-_et1)*1000:.0f}ms total={(_et2-_et0)*1000:.0f}ms")
-    return mesgs, provider_kw, model_kw, main_runtime, max_tokens
+    return mesgs, provider_kw, model_kw, main_runtime, max_tokens, temperature
 
 
 @app.post("/api/model/enhance-prompt-stream")
-async def enhance_prompt_stream(body: dict, profile: Optional[str] = None):
+async def enhance_prompt_stream(body: dict):
     """Streaming enhance — returns SSE text/event-stream."""
     text = str(body.get("prompt", "") or "").strip()
     session_id = str(body.get("session_id", "") or "").strip() or None
@@ -8043,7 +8117,7 @@ async def enhance_prompt_stream(body: dict, profile: Optional[str] = None):
 
         try:
             from starlette.concurrency import run_in_threadpool
-            mesgs, provider_kw, model_kw, main_runtime, max_tokens = \
+            mesgs, provider_kw, model_kw, main_runtime, max_tokens, temperature = \
                 await run_in_threadpool(_build_enhance_context, text, session_id, body.get("profile", "") or "balanced")
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)[:200]})}\n\n"
@@ -8056,7 +8130,7 @@ async def enhance_prompt_stream(body: dict, profile: Optional[str] = None):
             _log.warning(f"[enhance-timing] before_call_llm={(_et3-_et0)*1000:.0f}ms")
             stream = call_llm(
                 task="prompt_enhance", **provider_kw, **model_kw,
-                messages=mesgs, temperature=0.3, max_tokens=max_tokens,
+                messages=mesgs, temperature=temperature, max_tokens=max_tokens,
                 timeout=120, main_runtime=main_runtime,
                 stream=True, stream_options={"include_usage": True},
             )
@@ -8089,6 +8163,42 @@ async def enhance_prompt_stream(body: dict, profile: Optional[str] = None):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Continuous Work Mode ───────────────────────────────────────────────────
+# GET  /api/agent/continuous-work → { enabled: bool }
+# POST /api/agent/continuous-work → { enabled: bool }  (body: { enabled })
+# Toggles the continuous-work agent guidance and guardrail tightening.
+# Persisted to config.yaml so every new agent build picks it up.
+
+@app.get("/api/agent/continuous-work")
+async def get_continuous_work(profile: Optional[str] = None):
+    def _run():
+        with _profile_scope(profile):
+            cfg = load_config()
+            agent_cfg = cfg.get("agent", {})
+            if not isinstance(agent_cfg, dict):
+                agent_cfg = {}
+            return bool(agent_cfg.get("continuous_work", False))
+    enabled = await asyncio.to_thread(_run)
+    return {"enabled": enabled}
+
+
+@app.post("/api/agent/continuous-work")
+async def set_continuous_work(body: dict, profile: Optional[str] = None):
+    enabled = bool(body.get("enabled", False))
+    def _run():
+        with _profile_scope(profile):
+            cfg = load_config()
+            agent_cfg = cfg.get("agent", {})
+            if not isinstance(agent_cfg, dict):
+                agent_cfg = {}
+            agent_cfg["continuous_work"] = enabled
+            cfg["agent"] = agent_cfg
+            save_config(cfg)
+            return True
+    await asyncio.to_thread(_run)
+    return {"enabled": enabled}
 
 
 @app.post("/api/model/set")
@@ -8525,6 +8635,50 @@ async def update_config(body: ConfigUpdate, profile: Optional[str] = None):
     except Exception:
         _log.exception("PUT /api/config failed")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/agent/continuous-work")
+def get_continuous_work(profile: Optional[str] = None):
+    """Read the Continuous Work toggle (config.yaml ``agent.continuous_work``)."""
+    try:
+        with _config_profile_scope(profile):
+            cfg = load_config()
+            agent_section = cfg.get("agent")
+            if not isinstance(agent_section, dict):
+                agent_section = {}
+            enabled = bool(agent_section.get("continuous_work", False))
+        return {"continuous_work": enabled}
+    except HTTPException:
+        raise
+    except Exception:
+        _log.exception("GET /api/agent/continuous-work failed")
+        raise HTTPException(status_code=500, detail="Failed to read continuous work setting")
+
+
+@app.post("/api/agent/continuous-work")
+def set_continuous_work(body: dict, profile: Optional[str] = None):
+    """Write the Continuous Work toggle (config.yaml ``agent.continuous_work``).
+
+    The desktop composer calls this on toggle; the value lands in the profile's
+    config.yaml and is read by the next agent build (agent_init → system prompt
+    + guardrail thresholds).
+    """
+    try:
+        with _config_profile_scope(profile):
+            cfg = load_config()
+            agent_section = cfg.get("agent")
+            if not isinstance(agent_section, dict):
+                agent_section = {}
+            enabled = bool(body.get("enabled", False))
+            agent_section["continuous_work"] = enabled
+            cfg["agent"] = agent_section
+            save_config(cfg)
+        return {"continuous_work": enabled, "ok": True}
+    except HTTPException:
+        raise
+    except Exception:
+        _log.exception("POST /api/agent/continuous-work failed")
+        raise HTTPException(status_code=500, detail="Failed to save continuous work setting")
 
 
 def _is_other_profile(profile: Optional[str]) -> bool:

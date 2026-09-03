@@ -113,6 +113,7 @@ def write_clipboard_text(text: str) -> bool:
                     argv, input=text.encode("utf-8"),
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     timeout=10,
+                    creationflags=0x08000000 if sys.platform == "win32" else 0,  # CREATE_NO_WINDOW
                 )
             else:
                 b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
@@ -121,6 +122,7 @@ def write_clipboard_text(text: str) -> bool:
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     timeout=10,
+                    creationflags=0x08000000 if sys.platform == "win32" else 0,  # CREATE_NO_WINDOW
                 )
             if proc.returncode == 0:
                 return True
@@ -275,6 +277,7 @@ def _run_powershell(exe: str, script: str, timeout: int) -> subprocess.Completed
     return subprocess.run(
         [exe, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout,
+        creationflags=0x08000000 if sys.platform == "win32" else 0,  # CREATE_NO_WINDOW
     )
 
 

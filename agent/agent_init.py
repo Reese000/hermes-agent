@@ -1834,10 +1834,20 @@ def init_agent(
     except Exception:
         agent.lmstudio_load_mode = "explicit"
 
+    # Continuous Work mode — read early (before the guardrail controller is
+    # built) so the tightened warn_after thresholds can be applied. Default
+    # False; toggled from the desktop composer and persisted to config.yaml.
+    # Also consumed by agent/system_prompt.py to inject the guidance suffix.
+    _agent_section_cw = _agent_cfg.get("agent", {})
+    if not isinstance(_agent_section_cw, dict):
+        _agent_section_cw = {}
+    agent._continuous_work = bool(_agent_section_cw.get("continuous_work", False))
+
     try:
         agent._tool_guardrails = ToolCallGuardrailController(
             ToolCallGuardrailConfig.from_mapping(
-                _agent_cfg.get("tool_loop_guardrails", {})
+                _agent_cfg.get("tool_loop_guardrails", {}),
+                continuous_work=agent._continuous_work,
             )
         )
     except Exception as _tlg_err:

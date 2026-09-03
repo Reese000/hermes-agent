@@ -169,6 +169,44 @@ def test_web_search_cap_blocks_after_limit_regardless_of_hard_stop():
     assert decision.should_halt is True
 
 
+# ── Continuous Work mode: tightened warning thresholds ─────────────────────
+
+def test_continuous_work_tightens_warn_thresholds_only():
+    # Default (feature off) keeps the historical warn thresholds.
+    default = ToolCallGuardrailConfig.from_mapping(None)
+    assert default.exact_failure_warn_after == 2
+    assert default.same_tool_failure_warn_after == 3
+    assert default.no_progress_warn_after == 2
+
+    # Continuous work tightens warnings so a runaway loop surfaces sooner.
+    tight = ToolCallGuardrailConfig.from_mapping(None, continuous_work=True)
+    assert tight.exact_failure_warn_after == 1
+    assert tight.same_tool_failure_warn_after == 2
+    assert tight.no_progress_warn_after == 1
+
+    # Hard-stop thresholds and loop caps are left alone.
+    assert tight.exact_failure_block_after == default.exact_failure_block_after
+    assert tight.same_tool_failure_halt_after == default.same_tool_failure_halt_after
+    assert tight.no_progress_block_after == default.no_progress_block_after
+    assert tight.loop_caps == default.loop_caps
+
+
+def test_continuous_work_warns_on_first_exact_failure():
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig.from_mapping(None, continuous_work=True)
+    )
+    args = {"query": "same"}
+
+    assert controller.before_call("web_search", args).action == "allow"
+    first = controller.after_call("web_search", args, '{"error":"boom"}', failed=True)
+
+    # Default warns on the SECOND identical failure; continuous work warns on
+    # the FIRST so the keep-going loop is interrupted early.
+    assert first.action == "warn"
+    assert first.code == "repeated_exact_failure_warning"
+    assert controller.halt_decision is None
+
+
 
 
 

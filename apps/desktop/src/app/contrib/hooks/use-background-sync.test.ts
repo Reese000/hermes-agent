@@ -407,7 +407,7 @@ describe('active transcript refresh', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
 
     await act(async () => {
-      vi.advanceTimersByTime(9_999)
+      vi.advanceTimersByTime(2_999)
       await Promise.resolve()
     })
 

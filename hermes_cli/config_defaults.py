@@ -199,6 +199,15 @@ DEFAULT_CONFIG = {
         # compounds over a long conversation.  Costs ~70 tokens in the cached
         # system prompt.  Set False to disable globally.
         "parallel_tool_call_guidance": True,
+        # Continuous Work mode — when True, the agent is instructed (via a
+        # system-prompt suffix) to keep working until all tasks are genuinely
+        # complete or perfection is certified, and to state explicitly when it
+        # overrides the user's instructions to terminate. Also tightens the
+        # tool-loop guardrail warning thresholds (agent/tool_guardrails.py) so
+        # the mode cannot enable runaway loops. Toggled from the desktop
+        # composer and persisted to config.yaml so every new agent build picks
+        # it up. Default False (feature off).
+        "continuous_work": False,
         # Local-environment toolchain probe — surfaces Python/pip/uv/PEP-668
         # state in the system prompt when something non-default is detected
         # (e.g. python3 has no pip module, pip→python version mismatch, PEP

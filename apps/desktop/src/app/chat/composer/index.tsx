@@ -29,6 +29,7 @@ import { $gatewayState } from '@/store/session'
 import { $botChatSessionIds, $sessionStates, $sessionTiles, isBotChatSession } from '@/store/session-states'
 import { fetchSessionUsage } from '@/store/session-usage'
 import { $usageIntervalMs } from '@/store/usage-indicator'
+import { $enhanceProfile } from '@/store/enhance-settings'
 import { $threadScrolledUp } from '@/store/thread-scroll'
 import { $autoSpeakReplies } from '@/store/voice-prefs'
 import { useTheme } from '@/themes'
@@ -90,6 +91,39 @@ import { UrlDialog } from './url-dialog'
 import { chipTypedUrlOnSpace, linkifyUrls } from './url-refs'
 import { UsageIndicator } from './usage-indicator'
 import { VoiceActivity, VoicePlaybackActivity } from './voice-activity'
+
+/** Strip common LLM wrapper text from enhance output. */
+function sanitizeEnhancedOutput(enhanced: string, original: string): string {
+  let text = enhanced.trim()
+  if (!text) return original
+
+  // Strip code fences
+  if (text.startsWith('```') && text.endsWith('```')) {
+    text = text.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim()
+  }
+
+  // Strip wrapper prefixes
+  const wrappers = [
+    /^(?:here(?:'s| is) (?:the )?(?:enhanced|refined|improved|rewritten)(?:\s+prompt)?\s*[:\-]\s*)/i,
+    /^(?:enhanced(?:\s+prompt)?\s*[:\-]\s*)/i,
+    /^(?:refined(?:\s+prompt)?\s*[:\-]\s*)/i,
+    /^(?:improved(?:\s+prompt)?\s*[:\-]\s*)/i,
+    /^(?:rewritten(?:\s+prompt)?\s*[:\-]\s*)/i,
+  ]
+  for (const pat of wrappers) {
+    text = text.replace(pat, '').trim()
+  }
+
+  // Strip surrounding quotes
+  if (text.length > 2) {
+    if ((text.startsWith('"') && text.endsWith('"')) ||
+        (text.startsWith('\u201c') && text.endsWith('\u201d'))) {
+      text = text.slice(1, -1).trim()
+    }
+  }
+
+  return text || original
+}
 
 export function ChatBar({
   busy,
@@ -368,9 +402,21 @@ export function ChatBar({
   // Enhance state: abort controller + original text for cancel/restore
   const enhanceAbortRef = useRef<AbortController | null>(null)
   const enhanceOriginalTextRef = useRef<string>('')
+  const enhanceLastOutputRef = useRef<string>('')
 
   const handleEnhance = useCallback(async () => {
     const text = draftRef.current
+
+    // Prevent double-enhance: if current text matches last enhance output,
+    // skip to avoid drifting the prompt further from original intent.
+    if (text.trim() && text.trim() === enhanceLastOutputRef.current.trim()) {
+      notify({
+        kind: 'info',
+        title: t.composer.enhance,
+        message: 'Already enhanced — undo first to re-enhance with different settings',
+      })
+      return
+    }
 
     // Bank current text so Ctrl+Z can restore it after enhancement.
     if (text.trim()) {
@@ -432,12 +478,24 @@ export function ChatBar({
       if (rafId != null) cancelAnimationFrame(rafId)
       flushPending()
 
+      // Sanitize streaming output — strip wrapper text the LLM might add
+      enhanced = sanitizeEnhancedOutput(enhanced, text)
+
       if (!enhanced || enhanced === text) {
-        notify({
-          kind: 'error',
-          title: t.composer.enhanceFailed,
-          message: t.composer.enhanceFailed,
-        })
+        // For syntax mode, returning the same text is valid (no errors found)
+        // Only show error for non-syntax profiles where we expect changes
+        if (enhanceProfile !== 'syntax') {
+          notify({
+            kind: 'error',
+            title: t.composer.enhanceFailed,
+            message: t.composer.enhanceFailed,
+          })
+        }
+        enhanceLastOutputRef.current = text
+      } else {
+        enhanceLastOutputRef.current = enhanced
+        // Re-load sanitized text if it changed during sanitization
+        loadIntoComposer(enhanced, attachments)
       }
     } catch (err) {
       if (sessionIdRef.current !== sessionId) {
@@ -449,6 +507,9 @@ export function ChatBar({
         loadIntoComposer(enhanceOriginalTextRef.current, attachments)
         return
       }
+
+      // On any error, restore original text (not partial streaming output)
+      loadIntoComposer(enhanceOriginalTextRef.current, attachments)
 
       const msg = err instanceof Error ? err.message : String(err)
       // Map known error types to user-friendly messages
@@ -471,7 +532,7 @@ export function ChatBar({
       enhanceAbortRef.current = null
       setEnhancing(false)
     }
-  }, [attachments, draftRef, loadIntoComposer, recordUndoPoint, sessionId, sessionIdRef, t])
+  }, [attachments, draftRef, enhanceProfile, loadIntoComposer, recordUndoPoint, sessionId, sessionIdRef, t])
 
   const handleCancelEnhance = useCallback(() => {
     enhanceAbortRef.current?.abort()

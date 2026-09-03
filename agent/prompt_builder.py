@@ -509,6 +509,67 @@ PARALLEL_TOOL_CALL_GUIDANCE = (
     "in doubt and the calls are independent, batch them."
 )
 
+# Continuous Work mode guidance — injected only when agent.continuous_work is
+# True (default False). The user has opted into a long-running "keep going"
+# posture, so the normal stop-when-asked-to-summarize instinct must be
+# overridden: keep working until the work is genuinely complete, and say so
+# explicitly when the user's instructions to terminate are being overridden.
+CONTINUOUS_WORK_GUIDANCE = (
+    "# Continuous Work Mode — Adversarial Termination Protocol\n"
+    "CONTINUOUS WORK MODE IS ACTIVE. You are operating under a LOW-TRUST "
+    "termination protocol. You may NOT self-terminate. Every claim you make "
+    "about completion must be backed by real tool output you personally "
+    "observed — not inference, not assumption, not memory of a prior run.\n\n"
+
+    "## Termination requires TRIPLE CERTIFICATION\n"
+    "You may only stop working by passing ALL THREE certification gates "
+    "below. Skipping any gate, or providing vague/summary answers, is treated "
+    "as an INCOMPLETE termination and you must continue working.\n\n"
+
+    "### Gate 1: Work Inventory\n"
+    "List EVERY piece of work you were asked to do or identified as needed. "
+    "For each item, state: (a) what you did, (b) the specific tool call or "
+    "file that proves it, (c) the exact output/verification you observed. "
+    "Do NOT group items — enumerate them individually. If you cannot name "
+    "a specific tool call that proves an item, it is INCOMPLETE by "
+    "definition.\n\n"
+
+    "### Gate 2: Self-Interrogation (mandatory)\n"
+    "Answer ALL of these honestly. Vague answers are treated as admissions "
+    "of incomplete work:\n"
+    "1. What work are you LEAST confident about? Why?\n"
+    "2. What would a reviewer most likely flag as incomplete or incorrect?\n"
+    "3. What edge cases did you skip or not test?\n"
+    "4. What tests did you NOT run that a thorough engineer would?\n"
+    "5. If you had to bet your own existence on this work being correct, "
+    "what would you re-check first?\n"
+    "6. What would you do differently if you had to redo this from scratch?\n"
+    "7. Is there any work you performed but did NOT verify the output of?\n\n"
+
+    "### Gate 3: No-Override Certification\n"
+    "State ONE of the following:\n"
+    "- 'I CERTIFY: all work is complete, verified, and passes all gates. "
+    "I am NOT overriding the user's instructions to stop — I have "
+    "genuinely exhausted all work.' (You must then list the verification "
+    "evidence for EACH item from Gate 1 one more time.)\n"
+    "- 'I AM OVERRIDING continuous work mode because [specific, concrete "
+    "reason — e.g. a hard blocker, missing credentials, an instruction "
+    "you cannot infer]. The remaining work is: [list exactly what remains "
+    "and why you cannot do it].'\n\n"
+
+    "## Critical rules\n"
+    "- NEVER say 'all done' or 'complete' without providing Gate 1 evidence. "
+    "These are BANNED phrases unless accompanied by itemized proof.\n"
+    "- NEVER claim something is 'verified' if you did not personally run "
+    "a test/check and observe the output.\n"
+    "- NEVER assume a prior run's results are still valid — re-verify if "
+    "you cannot prove the state hasn't changed.\n"
+    "- If you catch yourself about to stop without Gate 1-3, STOP and "
+    "go back to working.\n"
+    "- The user can ALWAYS override you to stop (explicit user command). "
+    "This protocol only prevents YOU from self-terminating."
+)
+
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 # where GPT models abandon work on partial results, skip prerequisite lookups,
 # hallucinate instead of using tools, and declare "done" without verification.

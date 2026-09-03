@@ -37,7 +37,7 @@ export interface EnhanceProfile {
 
 export const ENHANCE_PROFILES: Record<string, EnhanceProfile> = {
   syntax: {
-    description: 'Focus on code syntax and structure only',
+    description: 'Fix code syntax errors only — never reword or restructure',
     label: 'Syntax Only',
     reasoning: 'low',
   },

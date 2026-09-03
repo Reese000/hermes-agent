@@ -32,6 +32,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from agent.prompt_builder import (
+    CONTINUOUS_WORK_GUIDANCE,
     DEFAULT_AGENT_IDENTITY,
     EXECUTION_GUIDANCE_MODELS,
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
@@ -486,6 +487,15 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # (default True) and only injected when tools are actually loaded.
     if getattr(agent, "_parallel_tool_call_guidance", True) and agent.valid_tool_names:
         stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
+
+    # Continuous Work mode: when the user has toggled it on (config.yaml
+    # agent.continuous_work), instruct the agent to keep working until the work
+    # is genuinely complete and to state explicitly when it overrides the
+    # user's instructions to terminate. Not gated on tools — the guidance
+    # applies to any long-running turn. Default off, so the cached prefix is
+    # byte-identical for everyone who hasn't enabled it.
+    if getattr(agent, "_continuous_work", False):
+        stable_parts.append(CONTINUOUS_WORK_GUIDANCE)
 
     # Tool-aware behavioral guidance: only inject when the tools are loaded
     tool_guidance = []

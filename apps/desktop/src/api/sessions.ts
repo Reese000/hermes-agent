@@ -7,7 +7,8 @@ import type {
   SessionInfo,
   SessionMessage,
   SessionMessagesResponse,
-  SessionSearchResponse
+  SessionSearchResponse,
+  SessionUsageResponse
 } from '@/types/hermes'
 
 import { capabilityScoped, getApiRequestConnection, hermesApi, type ProfileScope, profileScoped } from './client'
@@ -543,5 +544,12 @@ export function renameSession(
     path: `/api/sessions/${encodeURIComponent(id)}`,
     method: 'PATCH',
     body: { title, ...(profile ? { profile } : {}) }
+  })
+}
+
+export function getSessionUsage(sessionId: string): Promise<SessionUsageResponse> {
+  return window.hermesDesktop.api<SessionUsageResponse>({
+    ...profileScoped(),
+    path: `/api/sessions/${encodeURIComponent(sessionId)}/usage`
   })
 }

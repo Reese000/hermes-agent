@@ -51,6 +51,12 @@ logger = logging.getLogger(__name__)
 _BREAKER_THRESHOLD = 5
 _BREAKER_COOLDOWN_SECS = 120
 _PREFETCH_WAIT_SECS = 3
+# Max seconds shutdown() waits for an in-flight mem0-sync thread before
+# closing the backend. Server-side LLM fact extraction runs 10-90 s, so a
+# 5 s join (the old behaviour) closed the Qdrant client mid-insert and
+# silently dropped the memory ("Cannot send a request, as the client has
+# been closed").
+_SYNC_SHUTDOWN_WAIT_SECS = 120
 
 _CLIENT_ERROR_TYPES = ("MemoryNotFoundError", "ValidationError")
 
@@ -217,6 +223,7 @@ class Mem0MemoryProvider(MemoryProvider):
         self._breaker_open_until = 0.0
         self._breaker_lock = threading.Lock()
         self._sync_lock = threading.Lock()
+        self._sync_in_flight = threading.Event()
         self._prefetch_lock = threading.Lock()
         self._atexit_registered = False
 
@@ -485,6 +492,10 @@ class Mem0MemoryProvider(MemoryProvider):
             backend = self._backend
             if backend is None:
                 return
+            # Signal that the backend is about to be used so shutdown() waits
+            # for the extraction+insert to complete instead of closing the
+            # Qdrant client out from under us.
+            self._sync_in_flight.set()
             try:
                 messages = [
                     {"role": "user", "content": user_content},
@@ -501,6 +512,8 @@ class Mem0MemoryProvider(MemoryProvider):
             except Exception as e:
                 self._record_failure()
                 logger.warning("Mem0 sync failed: %s", e)
+            finally:
+                self._sync_in_flight.clear()
 
         with self._sync_lock:
             if self._sync_thread and self._sync_thread.is_alive():
@@ -617,9 +630,22 @@ class Mem0MemoryProvider(MemoryProvider):
             pass
 
     def shutdown(self) -> None:
-        for t in (self._prefetch_thread, self._sync_thread):
-            if t and t.is_alive():
-                t.join(timeout=5.0)
+        if self._prefetch_thread and self._prefetch_thread.is_alive():
+            self._prefetch_thread.join(timeout=5.0)
+        sync = self._sync_thread
+        if sync and sync.is_alive():
+            # Absorb thread-startup latency first: `_sync` may not have set
+            # `_sync_in_flight` yet even though it is about to call the backend.
+            sync.join(timeout=0.2)
+            if sync.is_alive():
+                if self._sync_in_flight.is_set():
+                    # Extraction is in flight (10-90 s). Wait for it so the
+                    # backend (and its Qdrant client) is never closed
+                    # mid-`backend.add`; that close is what drops the memory.
+                    sync.join(timeout=_SYNC_SHUTDOWN_WAIT_SECS)
+                else:
+                    # Never entered the backend (or already idle) — short join.
+                    sync.join(timeout=5.0)
         self._shutdown_backend()
 
 
