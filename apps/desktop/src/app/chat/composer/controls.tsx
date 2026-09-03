@@ -264,7 +264,6 @@ export function ComposerControls({
           </ModelMenuCloseContext.Provider>
         </DropdownMenuContent>
       </DropdownMenu>
-      <ContinuousWorkButton disabled={disabled} />
       {minimal ? null : (
         <>
           <ModelPill compact={compactModelPill} disabled={disabled} model={state.model} />
@@ -349,6 +348,7 @@ export function ComposerControls({
           until hovered. Here it costs no reserved space and sits with the other
           things you can press. */}
       {hudMode ? <HudWindowButtons /> : null}
+      <ContinuousWorkButton disabled={disabled} />
     </div>
   )
 }
