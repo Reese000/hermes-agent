@@ -48,6 +48,7 @@ export function useContinuousWorkStatusbarItem(): StatusbarItem {
       </>
     ),
     onSelect: toggle,
-    title: active ? copy.continuousWorkActive : copy.continuousWorkOff
+    title: active ? copy.continuousWorkActive : copy.continuousWorkOff,
+    variant: 'menu'
   }
 }
