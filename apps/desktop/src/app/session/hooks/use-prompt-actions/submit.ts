@@ -19,6 +19,7 @@ import {
   terminalContextBlocksFromDraft
 } from '@/store/composer'
 import { $hudMode } from '@/store/hud'
+import { continuousWorkForSession } from '@/store/continuous-work'
 import { clearNotifications, notify, notifyError } from '@/store/notifications'
 import { consumePendingCredentialWarning, requestDesktopOnboarding } from '@/store/onboarding'
 import { isStoredTranscriptReadOnly } from '@/store/read-only-transcript'
@@ -764,6 +765,10 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
           // rather than at Hermes. The gateway turns this into a per-turn hint
           // to read the window underneath and work in it.
           ...($hudMode.get() && { surface: 'hud' }),
+          // Continuous work is per-conversation: send the ACTIVE session's flag
+          // so the backend injects the guidance for this turn. Mid-session
+          // toggling works because the flag rides every submit.
+          ...(continuousWorkForSession(targetId) && { continuous_work: true }),
           // A queue drain is a "run after" message, never a live-turn
           // correction. The flag tells the gateway's busy path to hold it for
           // the next turn untouched — without it, losing the settle race

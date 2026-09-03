@@ -12999,6 +12999,23 @@ def _hud_surface_note(session: dict) -> str:
     return hud_surface_note(getattr(session.get("agent"), "valid_tool_names", None))
 
 
+def _continuous_work_note(session: dict) -> str:
+    """The continuous-work guidance for this turn, or "" when disabled.
+
+    Continuous work is per-conversation and can be toggled mid-session, so the
+    note is computed fresh every turn from the session's own flag (set by the
+    desktop on each prompt.submit) rather than from the byte-stable system
+    prompt. When enabled it carries the adversarial triple-certification
+    termination protocol so the agent keeps working until the work is truly
+    exhausted.
+    """
+    if not session.get("continuous_work"):
+        return ""
+    from agent.prompt_builder import CONTINUOUS_WORK_GUIDANCE
+
+    return CONTINUOUS_WORK_GUIDANCE
+
+
 def _prepend_note(run_message: Any, note: str) -> Any:
     """Prefix a per-turn note onto the MODEL INPUT, leaving the prompt alone.
 
@@ -13528,6 +13545,10 @@ def _run_prompt_submit(
             # Which window the message was typed into. HUD mode is per-turn
             # state, so it cannot live in the (byte-stable) system prompt.
             run_message = _prepend_note(run_message, _hud_surface_note(session))
+            # Continuous work rides the same per-turn note channel: it is
+            # per-conversation and toggled mid-session, so it cannot live in the
+            # byte-stable system prompt either.
+            run_message = _prepend_note(run_message, _continuous_work_note(session))
 
             def _stream(delta):
                 with session["history_lock"]:

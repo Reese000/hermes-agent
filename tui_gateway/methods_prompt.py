@@ -447,6 +447,10 @@ def _(rid, params: dict) -> dict:
     # in turn: a stale "hud" would tell the model the user is still floating
     # over another app when they are back in Hermes.
     session["client_surface"] = "hud" if params.get("surface") == "hud" else ""
+    # Per-conversation continuous-work flag. Read from every submit so a chat
+    # can enable it mid-session (the flag rides each turn; the note is computed
+    # fresh per turn from this session field, never from cached config).
+    session["continuous_work"] = bool(params.get("continuous_work"))
     has_truncation = (
         truncate_user_ordinal is not None
         or params.get("truncate_before_row_id") is not None

@@ -1,49 +1,50 @@
 import { atom } from 'nanostores'
 
-import { setContinuousWork } from '@/api/config'
-import { persistBoolean, storedBoolean } from '@/lib/storage'
-
 // ── Continuous Work settings store ─────────────────────────────────────────
-// Persists the continuous-work feature's on/off state to localStorage for
-// instant UI feedback, and mirrors the setting to the backend config
-// (agent.continuous_work) so the next agent build applies it.
+// Per-CONVERSATION continuous-work state. Each chat has its own flag, so
+// enabling it in one conversation never leaks into another.
 //
-// When enabled, the agent is instructed via system prompt to keep working
-// until all tasks are genuinely complete or perfection is certified. The
-// agent must explicitly state when overriding the user's instructions to
-// terminate. Anti-loop/anti-time-waste guards use the existing
-// tool_loop_guardrails system (thresholds tightened when active).
+// The flag is keyed by the runtime session id (the same id the submit path
+// uses). Runtime ids are ephemeral (they change across app restarts), so this
+// is an in-memory map rather than localStorage — a session's continuous-work
+// state lives exactly as long as the session does.
 //
 // Consumed by:
-//   - controls.tsx: toggle button in composer row
-//   - web_server.py: GET/POST /api/agent/continuous-work
-//   - system_prompt.py: CONTINUOUS_WORK_GUIDANCE suffix when active
+//   - continuous-work-statusbar.tsx: toggle reads/writes the ACTIVE session
+//   - submit.ts: sends `continuous_work` with each prompt.submit so the
+//     backend can inject the guidance for that turn
+//   - tui_gateway/server.py: `_continuous_work_note(session)` reads the flag
+//     the submit carried and prepends the guidance to that turn's model input
 // ───────────────────────────────────────────────────────────────────────────
-const ENABLED_KEY = 'hermes.desktop.continuous-work'
 
-/** Whether continuous work mode is active. */
-export const $continuousWork = atom(storedBoolean(ENABLED_KEY, false))
+/** Per-session continuous-work flags, keyed by runtime session id. */
+export const $continuousWorkBySession = atom<Record<string, boolean>>({})
 
-$continuousWork.subscribe(enabled => persistBoolean(ENABLED_KEY, enabled))
-
-/** Get the current continuous work state. */
-export function isContinuousWorkEnabled(): boolean {
-  return $continuousWork.get()
+/** Read the continuous-work flag for a session (absent = off). */
+export function continuousWorkForSession(sessionId: string | null | undefined): boolean {
+  if (!sessionId) {
+    return false
+  }
+  return $continuousWorkBySession.get()[sessionId] ?? false
 }
 
-/**
- * Flip the toggle. The local atom updates immediately (instant UI) and the
- * backend config is written best-effort — a failed write (backend down, older
- * gateway without the endpoint) leaves the local state authoritative for this
- * session, matching the wake-word toggle's local-first posture.
- */
-export async function toggleContinuousWork(): Promise<void> {
-  const next = !$continuousWork.get()
-  $continuousWork.set(next)
-
-  try {
-    await setContinuousWork(next)
-  } catch {
-    // Best-effort: keep the local toggle as the source of truth this session.
+/** Set the continuous-work flag for a session. */
+export function setContinuousWorkForSession(sessionId: string | null | undefined, enabled: boolean): void {
+  if (!sessionId) {
+    return
   }
+  const next = { ...$continuousWorkBySession.get() }
+  if (enabled) {
+    next[sessionId] = true
+  } else {
+    delete next[sessionId]
+  }
+  $continuousWorkBySession.set(next)
+}
+
+/** Toggle the continuous-work flag for a session, returning the new value. */
+export function toggleContinuousWorkForSession(sessionId: string | null | undefined): boolean {
+  const next = !continuousWorkForSession(sessionId)
+  setContinuousWorkForSession(sessionId, next)
+  return next
 }

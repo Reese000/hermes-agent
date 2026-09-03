@@ -41,8 +41,7 @@ import {
   Square,
   SteeringWheel,
   Volume2,
-  VolumeX,
-  Zap
+  VolumeX
 } from '@/lib/icons'
 import { displayModelName } from '@/lib/model-status-label'
 import { reasoningEffortLabel, type ReasoningEffort } from '@/lib/reasoning-effort'
@@ -56,8 +55,6 @@ import {
   ENHANCE_PROFILES
 } from '@/store/enhance-settings'
 import { $hudMode, closeHud, resetHudLayout } from '@/store/hud'
-import { $continuousWork } from '@/store/continuous-work'
-import { setContinuousWork } from '@/api/config'
 import { $wakeWord, toggleWakeWord } from '@/store/wake-word'
 
 import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from '@/app/shell/model-catalog-menu'
@@ -566,61 +563,6 @@ function WakeWordButton({ disabled, pausedForVoice = false }: { disabled: boolea
         {wake.listening && !pausedForVoice ? <Ear className={iconSize.sm} /> : <EarOff className={iconSize.sm} />}
       </Button>
     </Tip>
-  )
-}
-
-// Continuous Work toggle: when active, the agent is instructed to keep working
-// until all tasks are done or perfection is certified. Uses the Zap icon
-// (bolt) with accent highlight when active, mirroring the wake-word pattern.
-// Syncs with backend config via POST /api/agent/continuous-work.
-function ContinuousWorkButton({ disabled }: { disabled: boolean }) {
-  const { t } = useI18n()
-  const c = t.composer
-  const active = useStore($continuousWork)
-
-  const handleClick = useCallback(() => {
-    triggerHaptic(active ? 'close' : 'open')
-    const next = !active
-    $continuousWork.set(next)
-    // Sync with backend config so the next agent build picks it up
-    void setContinuousWork(next).catch(() => {
-      // Backend sync failed — local atom is still set, will retry on next toggle
-    })
-  }, [active])
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div className="contents">
-          <Tip label={active ? c.continuousWorkActive : c.continuousWorkOff}>
-            <Button
-              aria-label={active ? c.continuousWorkActive : c.continuousWorkOff}
-              aria-pressed={active}
-              className={cn(GHOST_ICON_BTN, 'p-0', active && ACTIVE_ICON_BTN)}
-              disabled={disabled}
-              onClick={handleClick}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <RefreshCw className={cn('size-4', active && 'animate-spin')} />
-            </Button>
-          </Tip>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-56">
-        <ContextMenuItem onSelect={handleClick}>
-          <Codicon name={active ? 'eye-closed' : 'check'} size="0.875rem" className="mr-2" />
-          {active ? 'Disable continuous work' : 'Enable continuous work'}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem disabled>
-          <span className="text-xs text-muted-foreground">
-            {active ? 'Agent will keep working until all tasks are done' : 'Agent stops after each response'}
-          </span>
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
   )
 }
 

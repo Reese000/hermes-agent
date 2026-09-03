@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react'
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 
 import type { StatusbarItem } from '@/app/shell/statusbar-controls'
 import {
@@ -10,16 +10,26 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useI18n } from '@/i18n'
 import { Zap, ZapFilled } from '@/lib/icons'
-import { $continuousWork } from '@/store/continuous-work'
+import { $continuousWorkBySession, setContinuousWorkForSession } from '@/store/continuous-work'
 
-export function useContinuousWorkStatusbarItem(): StatusbarItem {
+/**
+ * Per-conversation continuous-work statusbar item. Reads and writes the
+ * ACTIVE session's flag (keyed by runtime session id), so one chat's toggle
+ * never leaks into another.
+ */
+export function useContinuousWorkStatusbarItem(sessionId: string | null): StatusbarItem {
   const { t } = useI18n()
   const copy = t.composer
-  const active = useStore($continuousWork)
+  const active = useStore($continuousWorkBySession)[sessionId ?? ''] ?? false
 
-  const toggle = useMemo(() => () => {
-    $continuousWork.set(!$continuousWork.get())
-  }, [])
+  const setEnabled = useCallback(
+    (enabled: boolean) => {
+      setContinuousWorkForSession(sessionId, enabled)
+    },
+    [sessionId]
+  )
+
+  const toggle = useMemo(() => () => setEnabled(!active), [active, setEnabled])
 
   return {
     className: active ? 'bg-(--chrome-action-hover) text-foreground' : undefined,
@@ -33,9 +43,7 @@ export function useContinuousWorkStatusbarItem(): StatusbarItem {
         <DropdownMenuLabel>{copy.continuousWork}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup
-          onValueChange={value => {
-            $continuousWork.set(value === 'on')
-          }}
+          onValueChange={value => setEnabled(value === 'on')}
           value={active ? 'on' : 'off'}
         >
           <DropdownMenuRadioItem value="on">
