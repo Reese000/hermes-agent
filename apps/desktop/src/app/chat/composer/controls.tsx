@@ -348,7 +348,26 @@ export function ComposerControls({
           until hovered. Here it costs no reserved space and sits with the other
           things you can press. */}
       {hudMode ? <HudWindowButtons /> : null}
-      <ContinuousWorkButton disabled={disabled} />
+      <button
+        data-testid="continuous-work-toggle"
+        onClick={handleClick}
+        style={{
+          background: active ? 'rgba(var(--primary), 0.15)' : 'rgba(128,128,128,0.2)',
+          color: active ? 'var(--primary)' : 'var(--muted-foreground)',
+          border: '1px solid rgba(128,128,128,0.3)',
+          borderRadius: '6px',
+          padding: '4px 8px',
+          cursor: 'pointer',
+          fontSize: '11px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          minWidth: '44px',
+        }}
+      >
+        <RefreshCw size={14} style={{ animation: active ? 'spin 1s linear infinite' : 'none' }} />
+        {active ? 'On' : 'Off'}
+      </button>
     </div>
   )
 }
