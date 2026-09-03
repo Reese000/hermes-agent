@@ -594,14 +594,19 @@ function ContinuousWorkButton({ disabled }: { disabled: boolean }) {
       <Button
         aria-label={active ? c.continuousWorkActive : c.continuousWorkOff}
         aria-pressed={active}
-        className={cn(GHOST_ICON_BTN, 'p-0', active && ACTIVE_ICON_BTN, !active && 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground')}
+        className={cn(
+          'h-(--composer-control-size) shrink-0 gap-1.5 rounded-full px-2.5 text-xs font-medium',
+          active
+            ? 'bg-primary/15 text-primary hover:bg-primary/25'
+            : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+        )}
         disabled={disabled}
         onClick={handleClick}
-        size="icon"
         type="button"
         variant="ghost"
       >
-        <RefreshCw className={iconSize.sm} />
+        <RefreshCw className={cn(iconSize.sm, active && 'animate-spin')} />
+        <span className="hidden sm:inline">{active ? 'On' : 'Off'}</span>
       </Button>
     </Tip>
   )
