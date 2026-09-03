@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu'
 import { useI18n } from '@/i18n'
-import { RefreshCw } from '@/lib/icons'
+import { Zap, ZapFilled } from '@/lib/icons'
 import { $continuousWork } from '@/store/continuous-work'
 
 export function useContinuousWorkStatusbarItem(): StatusbarItem {
@@ -23,7 +23,7 @@ export function useContinuousWorkStatusbarItem(): StatusbarItem {
 
   return {
     className: active ? 'bg-(--chrome-action-hover) text-foreground' : undefined,
-    icon: <RefreshCw className={active ? 'size-3.5' : 'size-3.5 opacity-70'} style={active ? { animation: 'spin 2s linear infinite' } : undefined} />,
+    icon: active ? <ZapFilled className="size-3.5" /> : <Zap className="size-3.5 opacity-70" />,
     id: 'continuous-work',
     label: active ? 'CW On' : 'CW Off',
     menuAlign: 'end',
