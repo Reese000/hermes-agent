@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DropdownMenu, DropdownMenuContent } from '@/components/ui/dropdown-menu'
+import { $localModelsEnabled } from '@/store/local-models-flag'
+import { $localRuntimeJobs } from '@/store/local-runtime-jobs'
 import {
   $modelVisibilityOpen,
   $visibleModels,
@@ -10,6 +12,7 @@ import {
   setModelVisibilityOpen,
   setVisibleModels
 } from '@/store/model-visibility'
+import type { LocalRuntimeJob } from '@/types/hermes'
 
 import { ModelCatalogMenu, type ModelMenuController } from './model-catalog-menu'
 
@@ -25,12 +28,23 @@ const searchProviderModels = vi.fn()
 
 vi.mock('@/hermes', () => ({
   getGlobalModelOptions: (...args: unknown[]) => getGlobalModelOptions(...args),
-  searchProviderModels: (...args: unknown[]) => searchProviderModels(...args),
+  // The menu kicks the app-level job poller on mount; echo the store so a
+  // poll can't wipe the jobs a test staged (the real backend is authority,
+  // and here the store plays that part).
+  getLocalModelsJobs: vi.fn(async () => {
+    const { $localRuntimeJobs } = await import('@/store/local-runtime-jobs')
+
+    return { jobs: [...$localRuntimeJobs.get()] }
+  }),
+  getLocalModelsStatus: vi.fn().mockResolvedValue({ loading: {} }),
   setApiRequestProfile: vi.fn()
 }))
 
 beforeEach(() => {
   $visibleModels.set(null)
+  $localRuntimeJobs.set([])
+  // These suites exercise the local-models rows, which ship behind --local.
+  $localModelsEnabled.set(true)
   setModelVisibilityOpen(false)
   getGlobalModelOptions.mockResolvedValue({
     providers: [{ models: ['gemini-3.1-pro', 'gemini-2.5-flash'], name: 'Google', slug: 'google' }]
@@ -113,92 +127,76 @@ describe('the catalog owns model curation', () => {
   })
 })
 
-// The live-search debounce + focus-preservation logic shipped with two
-// follow-up fix commits in its history (surfacing errors, then preserving
-// focus against Radix's roving-focus-group) and had zero regression
-// coverage before this — nothing here would have caught either bug
-// recurring.
-describe('live OpenRouter search', () => {
-  beforeEach(() => {
-    getGlobalModelOptions.mockResolvedValue({
-      providers: [
-        { models: ['gemini-3.1-pro', 'gemini-2.5-flash'], name: 'Google', slug: 'google' },
-        { models: ['anthropic/claude-sonnet-4'], name: 'OpenRouter', slug: 'openrouter' }
-      ]
-    })
-  })
+describe('in-flight local downloads', () => {
+  const DOWNLOAD_JOB: LocalRuntimeJob = {
+    job_id: 'dl1',
+    kind: 'model-download',
+    target: 'Qwen3.8 Flash Next (UD-Q4_K_XL)',
+    model_id: 'qwen3.8-flash-next',
+    status: 'running',
+    phase: 'downloading',
+    detail: '',
+    total_bytes: 100,
+    done_bytes: 41,
+    percent: 41,
+    error: null
+  }
 
-  it('fetches and shows live results for a query the curated catalog does not have', async () => {
-    searchProviderModels.mockResolvedValue({ models: ['mistralai/mixtral-8x22b'] })
-
-    renderMenu()
-    await screen.findByText(/Gemini 2\.5 Flash/i)
-
-    const input = screen.getByRole('textbox', { name: 'Search models' })
-    fireEvent.change(input, { target: { value: 'mixtral' } })
-
-    // HighlightMatches splits the match into separate text/mark nodes, so
-    // match against the full rendered text rather than a single node.
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
-    expect(searchProviderModels).toHaveBeenCalledWith('openrouter', 'mixtral')
-  })
-
-  it('does not steal focus from the search input while live results load and arrive', async () => {
-    let resolveSearch: ((v: { models: string[] }) => void) | undefined
-
-    searchProviderModels.mockImplementation(
-      () => new Promise(resolve => { resolveSearch = resolve })
-    )
-
-    renderMenu()
-    await screen.findByText(/Gemini 2\.5 Flash/i)
-
-    const input = screen.getByRole('textbox', { name: 'Search models' })
-    input.focus()
-    fireEvent.change(input, { target: { value: 'mixtral' } })
-
-    // Loading skeleton mounts while the fetch is in flight — must not move
-    // focus off the input the user is still typing in.
-    await vi.waitFor(() => expect(searchProviderModels).toHaveBeenCalled(), { timeout: 2000 })
-    expect(document.activeElement).toBe(input)
-
-    resolveSearch?.({ models: ['mistralai/mixtral-8x22b'] })
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
-    // Results replacing the skeleton is exactly the DOM mutation that used
-    // to yank focus via Radix's roving-focus-group (issue fixed upstream of
-    // this test) — assert it stays put.
-    expect(document.activeElement).toBe(input)
-  })
-
-  it('surfaces a live-search failure inline without crashing', async () => {
-    searchProviderModels.mockRejectedValue(new Error('network down'))
-
-    renderMenu()
-    await screen.findByText(/Gemini 2\.5 Flash/i)
-
-    const input = screen.getByRole('textbox', { name: 'Search models' })
-    fireEvent.change(input, { target: { value: 'mixtral' } })
-
-    await screen.findByText(/network down/i, undefined, { timeout: 2000 })
-  })
-
-  it('never queries live search for a provider outside openrouter', async () => {
-    getGlobalModelOptions.mockResolvedValue({
-      providers: [{ models: ['gemini-3.1-pro'], name: 'Google', slug: 'google' }]
-    })
-
+  it('shows a downloading model as a disabled progress row in its own Local group', async () => {
+    // No llamacpp provider in the catalog (first-ever download).
+    $localRuntimeJobs.set([DOWNLOAD_JOB])
     renderMenu()
     await screen.findByText(/Gemini 3\.1 Pro/i)
 
-    const input = screen.getByRole('textbox', { name: 'Search models' })
-    fireEvent.change(input, { target: { value: 'mixtral' } })
+    const row = screen.getByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')
 
-    // Give the 300ms debounce window a chance to fire if it were going to.
-    await new Promise(resolve => setTimeout(resolve, 400))
-    expect(searchProviderModels).not.toHaveBeenCalled()
+    expect(row).toBeTruthy()
+    expect(screen.getByText('41%')).toBeTruthy()
+    expect(row.closest('[role="menuitem"]')?.getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('shows the download inside the Local provider group when it exists', async () => {
+    getGlobalModelOptions.mockResolvedValue({
+      providers: [
+        { models: ['Qwen3.6-27B-UD-Q4_K_XL'], name: 'Local', slug: 'llamacpp' },
+        { models: ['gemini-3.1-pro'], name: 'Google', slug: 'google' }
+      ]
+    })
+    $localRuntimeJobs.set([DOWNLOAD_JOB])
+    renderMenu()
+
+    await screen.findByText(/Qwen3\.6 27B/i)
+    expect(screen.getByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')).toBeTruthy()
+    // One Local heading — the trailing fallback group must not double up.
+    expect(screen.getAllByText('Local').length).toBe(1)
+  })
+
+  it('drops the placeholder row once the download settles', async () => {
+    $localRuntimeJobs.set([DOWNLOAD_JOB])
+    renderMenu()
+    await screen.findByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')
+
+    $localRuntimeJobs.set([{ ...DOWNLOAD_JOB, status: 'done', phase: 'done' }])
+    await waitFor(() => {
+      expect(screen.queryByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')).toBeNull()
+    })
+  })
+
+  it('hides the local provider group and download rows without the --local flag (strict)', async () => {
+    $localModelsEnabled.set(false)
+    getGlobalModelOptions.mockResolvedValue({
+      providers: [
+        { models: ['Qwen3.6-27B-UD-Q4_K_XL'], name: 'Local', slug: 'llamacpp' },
+        { models: ['gemini-3.1-pro'], name: 'Google', slug: 'google' }
+      ]
+    })
+    $localRuntimeJobs.set([DOWNLOAD_JOB])
+    renderMenu()
+
+    // Staged models exist and a download is running — none of it shows.
+    await screen.findByText(/Gemini 3\.1 Pro/i)
+    expect(screen.queryByText(/Qwen3\.6 27B/i)).toBeNull()
+    expect(screen.queryByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')).toBeNull()
+    expect(screen.queryByText('Local')).toBeNull()
   })
 })

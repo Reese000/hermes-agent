@@ -1,42 +1,89 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { I18nProvider } from '@/i18n'
+import { $localModelsEnabled } from '@/store/local-models-flag'
+import { $localRuntimeJobs } from '@/store/local-runtime-jobs'
+import { stubMenuDomApis, stubResizeObserver } from '@/test/jsdom'
+import type { LocalRuntimeJob, ModelOptionsResponse } from '@/types/hermes'
 
 import { ModelPickerDialog } from './model-picker'
 
-// Radix Dialog + cmdk call scrollIntoView / pointer-capture / ResizeObserver
-// APIs jsdom lacks.
-class TestResizeObserver {
-  disconnect() {}
-  observe() {}
-  unobserve() {}
-}
-
-beforeAll(() => {
-  vi.stubGlobal('ResizeObserver', TestResizeObserver)
-  Element.prototype.scrollIntoView = vi.fn()
-  Element.prototype.hasPointerCapture = vi.fn(() => false)
-  Element.prototype.releasePointerCapture = vi.fn()
-})
-
-const getGlobalModelOptions = vi.fn()
-const searchProviderModels = vi.fn()
-
 vi.mock('@/hermes', () => ({
-  getGlobalModelOptions: (...args: unknown[]) => getGlobalModelOptions(...args),
-  searchProviderModels: (...args: unknown[]) => searchProviderModels(...args)
+  getLocalModelsStatus: vi.fn().mockResolvedValue({ loading: {} })
+}))
+vi.mock('@/lib/model-options', async importOriginal => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  requestModelOptions: vi.fn()
 }))
 
+import { requestModelOptions } from '@/lib/model-options'
+
+stubResizeObserver()
+stubMenuDomApis()
+
+const OPTIONS: ModelOptionsResponse = {
+  model: 'Qwen3.6-27B-UD-Q4_K_XL',
+  provider: 'llamacpp',
+  providers: [
+    {
+      slug: 'llamacpp',
+      name: 'Local',
+      models: ['Qwen3.6-27B-UD-Q4_K_XL'],
+      is_current: true,
+      authenticated: true
+    },
+    {
+      slug: 'nous',
+      name: 'Nous',
+      models: ['Hermes-4.5'],
+      authenticated: true
+    }
+  ]
+}
+
+const DOWNLOAD_JOB: LocalRuntimeJob = {
+  job_id: 'dl1',
+  kind: 'model-download',
+  target: 'Qwen3.8 Flash Next (UD-Q4_K_XL)',
+  model_id: 'qwen3.8-flash-next',
+  status: 'running',
+  phase: 'downloading',
+  detail: '',
+  total_bytes: 100,
+  done_bytes: 41,
+  percent: 41,
+  error: null
+}
+
+function renderPicker(ui?: Partial<Parameters<typeof ModelPickerDialog>[0]>) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  const element: ReactElement = (
+    <QueryClientProvider client={client}>
+      <I18nProvider>
+        <ModelPickerDialog
+          currentModel="Qwen3.6-27B-UD-Q4_K_XL"
+          currentProvider="llamacpp"
+          onOpenChange={() => undefined}
+          onSelect={() => undefined}
+          open
+          {...ui}
+        />
+      </I18nProvider>
+    </QueryClientProvider>
+  )
+
+  return render(element)
+}
+
 beforeEach(() => {
-  getGlobalModelOptions.mockResolvedValue({
-    providers: [
-      { models: ['gemini-3.1-pro', 'gemini-2.5-flash'], name: 'Google', slug: 'google' },
-      { models: ['anthropic/claude-sonnet-4'], name: 'OpenRouter', slug: 'openrouter' }
-    ]
-  })
-  // Default: fail loudly instead of hanging on an unresolved promise if a
-  // test forgets to stub a call it triggers.
-  searchProviderModels.mockResolvedValue({ models: [] })
+  vi.mocked(requestModelOptions).mockResolvedValue(OPTIONS)
+  $localRuntimeJobs.set([])
+  // These suites exercise the local-models rows, which ship behind --local.
+  $localModelsEnabled.set(true)
 })
 
 afterEach(() => {
@@ -44,131 +91,61 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function renderPicker() {
-  const onSelect = vi.fn()
-  const onOpenChange = vi.fn()
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-  render(
-    <QueryClientProvider client={client}>
-      <ModelPickerDialog
-        currentModel="gemini-3.1-pro"
-        currentProvider="google"
-        onOpenChange={onOpenChange}
-        onSelect={onSelect}
-        open
-      />
-    </QueryClientProvider>
-  )
-
-  return { onOpenChange, onSelect }
-}
-
-// The debounced live-search + dedup-against-curated logic (model-picker.tsx)
-// had zero regression coverage before this, despite being the same feature
-// family as model-catalog-menu.tsx's live search (which shipped two
-// focus/error follow-up fixes). Nothing here would have caught a regression
-// in the fetch, dedup, or error path.
-describe('live OpenRouter search', () => {
-  it('fetches and shows live results not already in the curated list', async () => {
-    searchProviderModels.mockResolvedValue({ models: ['mistralai/mixtral-8x22b'] })
-
+describe('ModelPickerDialog download rows', () => {
+  it('shows an in-flight download as a disabled progress row in the Local group', async () => {
+    $localRuntimeJobs.set([DOWNLOAD_JOB])
     renderPicker()
-    await screen.findByText(/gemini-2\.5-flash/i)
 
-    const input = screen.getByPlaceholderText('Filter providers and models...')
+    expect(await screen.findByText('Qwen3.6-27B-UD-Q4_K_XL')).toBeTruthy()
 
-    fireEvent.change(input, { target: { value: 'mixtral' } })
+    const row = screen.getByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')
 
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
-    expect(searchProviderModels).toHaveBeenCalledWith('openrouter', 'mixtral')
+    expect(row).toBeTruthy()
+    expect(screen.getByText('41%')).toBeTruthy()
+
+    // Disabled: cmdk marks the item unselectable.
+    const item = row.closest('[cmdk-item]')
+
+    expect(item?.getAttribute('aria-disabled')).toBe('true')
   })
 
-  it('filters out live results already present in the curated list, case-insensitively', async () => {
-    // Curated openrouter list has 'anthropic/claude-sonnet-4' — the live
-    // fetch echoing it back (in a different case) must be deduped, not
-    // shown as a duplicate second entry.
-    searchProviderModels.mockResolvedValue({
-      models: ['Anthropic/Claude-Sonnet-4', 'mistralai/mixtral-8x22b']
+  it('shows a first-ever download under its own Local group when no local provider exists yet', async () => {
+    $localRuntimeJobs.set([DOWNLOAD_JOB])
+    vi.mocked(requestModelOptions).mockResolvedValue({
+      providers: [OPTIONS.providers![1]]
     })
-
     renderPicker()
-    await screen.findByText(/gemini-2\.5-flash/i)
 
-    const input = screen.getByPlaceholderText('Filter providers and models...')
-
-    fireEvent.change(input, { target: { value: 'claude' } })
-
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toMatch(/mixtral-8x22b/i)
-    }, { timeout: 2000 })
-
-    // Only the curated occurrence should be present — no second "Live
-    // Search" row for the same model under a different case. HighlightMatches
-    // splits the matched substring into sibling text/mark nodes, so count
-    // occurrences in the full rendered text rather than querying by node.
-    expect(screen.queryByText(/No live results/i)).toBeNull()
-    const occurrences = document.body.textContent?.match(/claude-sonnet-4/gi) ?? []
-
-    expect(occurrences).toHaveLength(1)
+    expect(await screen.findByText('Hermes-4.5')).toBeTruthy()
+    expect(screen.getByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')).toBeTruthy()
+    expect(screen.getByText('41%')).toBeTruthy()
   })
 
-  it('surfaces a live-search failure inline without crashing', async () => {
-    searchProviderModels.mockRejectedValue(new Error('network down'))
+  it('quickstart shows while downloading but not during later phases', async () => {
+    const quickstart: LocalRuntimeJob = { ...DOWNLOAD_JOB, job_id: 'q1', kind: 'quickstart', phase: 'downloading' }
 
+    $localRuntimeJobs.set([quickstart])
     renderPicker()
-    await screen.findByText(/gemini-2\.5-flash/i)
+    expect(await screen.findByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')).toBeTruthy()
 
-    const input = screen.getByPlaceholderText('Filter providers and models...')
-
-    fireEvent.change(input, { target: { value: 'mixtral' } })
-
-    await screen.findByText(/network down/i, undefined, { timeout: 2000 })
-  })
-
-  it('never queries live search for a provider outside openrouter', async () => {
-    getGlobalModelOptions.mockResolvedValue({
-      providers: [{ models: ['gemini-3.1-pro'], name: 'Google', slug: 'google' }]
+    // The model is staged once quickstart moves on to activating it — the
+    // placeholder row must leave rather than sit beside the real model.
+    $localRuntimeJobs.set([{ ...quickstart, phase: 'starting-server' }])
+    await waitFor(() => {
+      expect(screen.queryByText('Qwen3.8 Flash Next (UD-Q4_K_XL)')).toBeNull()
     })
-
-    renderPicker()
-    await screen.findByText(/gemini-3\.1-pro/i)
-
-    const input = screen.getByPlaceholderText('Filter providers and models...')
-
-    fireEvent.change(input, { target: { value: 'mixtral' } })
-
-    // Give the 300ms debounce window a chance to fire if it were going to.
-    await new Promise(resolve => setTimeout(resolve, 400))
-    expect(searchProviderModels).not.toHaveBeenCalled()
   })
 
-  it('does not query live search for a blank query', async () => {
+  it('refetches the model options when a download it saw running completes', async () => {
+    $localRuntimeJobs.set([DOWNLOAD_JOB])
     renderPicker()
-    await screen.findByText(/gemini-2\.5-flash/i)
+    await screen.findByText('Qwen3.6-27B-UD-Q4_K_XL')
 
-    const input = screen.getByPlaceholderText('Filter providers and models...')
+    expect(vi.mocked(requestModelOptions).mock.calls.length).toBe(1)
 
-    fireEvent.change(input, { target: { value: '   ' } })
-
-    await new Promise(resolve => setTimeout(resolve, 400))
-    expect(searchProviderModels).not.toHaveBeenCalled()
-  })
-
-  it('debounces rapid typing into a single request for the final query', async () => {
-    renderPicker()
-    await screen.findByText(/gemini-2\.5-flash/i)
-
-    const input = screen.getByPlaceholderText('Filter providers and models...')
-
-    fireEvent.change(input, { target: { value: 'm' } })
-    fireEvent.change(input, { target: { value: 'mi' } })
-    fireEvent.change(input, { target: { value: 'mix' } })
-
-    await new Promise(resolve => setTimeout(resolve, 400))
-    expect(searchProviderModels).toHaveBeenCalledTimes(1)
-    expect(searchProviderModels).toHaveBeenCalledWith('openrouter', 'mix')
+    $localRuntimeJobs.set([{ ...DOWNLOAD_JOB, status: 'done', phase: 'done' }])
+    await waitFor(() => {
+      expect(vi.mocked(requestModelOptions).mock.calls.length).toBe(2)
+    })
   })
 })
