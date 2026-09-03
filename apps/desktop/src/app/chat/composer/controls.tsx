@@ -1,6 +1,8 @@
 import { useStore } from '@nanostores/react'
 import { useCallback, useMemo, useState } from 'react'
 
+import { setContinuousWork } from '@/api/config'
+import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from '@/app/shell/model-catalog-menu'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Codicon } from '@/components/ui/codicon'
@@ -45,8 +47,9 @@ import {
   Zap
 } from '@/lib/icons'
 import { displayModelName } from '@/lib/model-status-label'
-import { reasoningEffortLabel, type ReasoningEffort } from '@/lib/reasoning-effort'
+import { type ReasoningEffort, reasoningEffortLabel } from '@/lib/reasoning-effort'
 import { cn } from '@/lib/utils'
+import { $continuousWork } from '@/store/continuous-work'
 import {
   $enhanceEnabled,
   $enhanceModel,
@@ -56,11 +59,8 @@ import {
   ENHANCE_PROFILES
 } from '@/store/enhance-settings'
 import { $hudMode, closeHud, resetHudLayout } from '@/store/hud'
-import { $continuousWork } from '@/store/continuous-work'
-import { setContinuousWork } from '@/api/config'
 import { $wakeWord, toggleWakeWord } from '@/store/wake-word'
 
-import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from '@/app/shell/model-catalog-menu'
 import { ACTIVE_ICON_BTN, GHOST_ICON_BTN, PRIMARY_ICON_BTN } from './control-classes'
 import type { ConversationStatus } from './hooks/use-voice-conversation'
 import { ModelPill } from './model-pill'
@@ -196,13 +196,13 @@ export function ComposerControls({
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div className="contents">
-              <Tip label={enhancing ? c.enhancing : (
+              <Tip className="max-w-52" label={enhancing ? c.enhancing : (
                 <>
                   <span className="!block font-medium">{c.enhance}</span>
                   <span className="!block text-[10px] opacity-70">{ENHANCE_PROFILES[enhanceProfile]?.label || enhanceProfile} · {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
                   <span className="!block mt-0.5 text-[8px] italic opacity-40">right-click to configure</span>
                 </>
-              )} className="max-w-52">
+              )}>
                 <Button
                   aria-label={enhancing ? c.enhancing : c.enhance}
                   className={cn(GHOST_ICON_BTN, 'p-0')}
@@ -219,13 +219,13 @@ export function ComposerControls({
           </ContextMenuTrigger>
           <ContextMenuContent className="w-64">
             <ContextMenuItem onSelect={() => $enhanceEnabled.set(false)}>
-              <Codicon name="eye-closed" size="0.875rem" className="mr-2" />
+              <Codicon className="mr-2" name="eye-closed" size="0.875rem" />
               Hide enhance button
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuSub>
               <ContextMenuSubTrigger>
-                <Codicon name="list-filter" size="0.875rem" className="mr-2" />
+                <Codicon className="mr-2" name="list-filter" size="0.875rem" />
                 Profile: {ENHANCE_PROFILES[enhanceProfile]?.label || enhanceProfile}
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="w-48">
@@ -241,17 +241,17 @@ export function ComposerControls({
               </ContextMenuSubContent>
             </ContextMenuSub>
             <ContextMenuItem
-              onSelect={() => setModelMenuOpen(true)}
               onPointerEnter={() => setModelMenuOpen(true)}
+              onSelect={() => setModelMenuOpen(true)}
             >
-              <Codicon name="settings-gear" size="0.875rem" className="mr-2" />
+              <Codicon className="mr-2" name="settings-gear" size="0.875rem" />
               <span className="min-w-0 flex-1 truncate">Model: {displayModelName(enhanceModel)}</span>
-              <Codicon name="chevron-right" size="0.75rem" className="ml-auto opacity-50" />
+              <Codicon className="ml-auto opacity-50" name="chevron-right" size="0.75rem" />
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
       ) : null}
-      <DropdownMenu open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
+      <DropdownMenu onOpenChange={setModelMenuOpen} open={modelMenuOpen}>
         <DropdownMenuTrigger asChild>
           <span className="sr-only" />
         </DropdownMenuTrigger>

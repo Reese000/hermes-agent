@@ -21,6 +21,7 @@ import { sessionCompacting } from '@/store/compaction'
 import { browseBackward, browseForward, deriveUserHistory, isBrowsingHistory } from '@/store/composer-input-history'
 import { POPOUT_WIDTH_REM } from '@/store/composer-popout'
 import { parkQueuedPrompts, removeQueuedPrompt, unparkQueuedPrompts } from '@/store/composer-queue'
+import { $enhanceProfile } from '@/store/enhance-settings'
 import { $hudMode } from '@/store/hud'
 import { notify } from '@/store/notifications'
 import { sessionBlockingPrompt } from '@/store/prompts'
@@ -28,9 +29,8 @@ import { toggleReview } from '@/store/review'
 import { $gatewayState } from '@/store/session'
 import { $botChatSessionIds, $sessionStates, $sessionTiles, isBotChatSession } from '@/store/session-states'
 import { fetchSessionUsage } from '@/store/session-usage'
-import { $usageIntervalMs } from '@/store/usage-indicator'
-import { $enhanceProfile } from '@/store/enhance-settings'
 import { $threadScrolledUp } from '@/store/thread-scroll'
+import { $usageIntervalMs } from '@/store/usage-indicator'
 import { $autoSpeakReplies } from '@/store/voice-prefs'
 import { useTheme } from '@/themes'
 
@@ -95,7 +95,8 @@ import { VoiceActivity, VoicePlaybackActivity } from './voice-activity'
 /** Strip common LLM wrapper text from enhance output. */
 function sanitizeEnhancedOutput(enhanced: string, original: string): string {
   let text = enhanced.trim()
-  if (!text) return original
+
+  if (!text) {return original}
 
   // Strip code fences
   if (text.startsWith('```') && text.endsWith('```')) {
@@ -110,6 +111,7 @@ function sanitizeEnhancedOutput(enhanced: string, original: string): string {
     /^(?:improved(?:\s+prompt)?\s*[:\-]\s*)/i,
     /^(?:rewritten(?:\s+prompt)?\s*[:\-]\s*)/i,
   ]
+
   for (const pat of wrappers) {
     text = text.replace(pat, '').trim()
   }
@@ -415,6 +417,7 @@ export function ChatBar({
         title: t.composer.enhance,
         message: 'Already enhanced — undo first to re-enhance with different settings',
       })
+
       return
     }
 
@@ -449,33 +452,39 @@ export function ChatBar({
 
       const flushPending = () => {
         rafId = null
+
         if (pending) {
           enhanced += pending
           pending = ''
           loadIntoComposer(enhanced, attachments)
         }
+
         flushResolve?.()
         flushResolve = null
       }
 
       for await (const chunk of enhancePromptStream(text, sessionId, enhanceProfile, controller.signal)) {
         if (sessionIdRef.current !== sessionId) {
-          if (rafId != null) cancelAnimationFrame(rafId)
+          if (rafId != null) {cancelAnimationFrame(rafId)}
+
           return
         }
+
         pending += chunk
+
         // Schedule a rAF to flush accumulated text to the DOM.
         // Multiple chunks within one frame accumulate in `pending`
         // and get flushed together at ~30fps.
         if (rafId == null) {
           rafId = requestAnimationFrame(flushPending)
         }
+
         // Yield so the rAF callback can fire between chunks
         await new Promise<void>(r => { flushResolve = r })
       }
 
       // Final flush — ensure the complete text is rendered
-      if (rafId != null) cancelAnimationFrame(rafId)
+      if (rafId != null) {cancelAnimationFrame(rafId)}
       flushPending()
 
       // Sanitize streaming output — strip wrapper text the LLM might add
@@ -491,6 +500,7 @@ export function ChatBar({
             message: t.composer.enhanceFailed,
           })
         }
+
         enhanceLastOutputRef.current = text
       } else {
         enhanceLastOutputRef.current = enhanced
@@ -505,6 +515,7 @@ export function ChatBar({
       // Handle abort (cancel) — restore original text
       if (err instanceof DOMException && err.name === 'AbortError') {
         loadIntoComposer(enhanceOriginalTextRef.current, attachments)
+
         return
       }
 
@@ -512,6 +523,7 @@ export function ChatBar({
       loadIntoComposer(enhanceOriginalTextRef.current, attachments)
 
       const msg = err instanceof Error ? err.message : String(err)
+
       // Map known error types to user-friendly messages
       const detail = msg.includes('rate_limited')
         ? t.composer.enhanceRateLimited

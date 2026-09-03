@@ -20,6 +20,7 @@ export type UsageIntervalMs = (typeof USAGE_INTERVAL_OPTIONS)[number]
 
 function parseInterval(raw: string | null): UsageIntervalMs {
   const n = Number(raw)
+
   return USAGE_INTERVAL_OPTIONS.includes(n as UsageIntervalMs) ? (n as UsageIntervalMs) : 5_000
 }
 

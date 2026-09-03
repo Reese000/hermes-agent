@@ -16085,6 +16085,7 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
         // Process complete SSE lines
         const lines = buffer.split('\n')
         buffer = lines.pop() || '' // Keep incomplete line in buffer
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             event.sender.send('hermes:api-stream:chunk', { data: line.slice(6) })
@@ -16096,6 +16097,7 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
         if (buffer.startsWith('data: ')) {
           event.sender.send('hermes:api-stream:chunk', { data: buffer.slice(6) })
         }
+
         event.sender.send('hermes:api-stream:done', { ok: true })
       })
       res.on('error', err => {
@@ -16114,6 +16116,7 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
     if (body) {
       req.write(body)
     }
+
     req.end()
   } catch (err) {
     event.sender.send('hermes:api-stream:done', {
@@ -16157,6 +16160,7 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
         // Process complete SSE lines
         const lines = buffer.split('\n')
         buffer = lines.pop() || '' // Keep incomplete line in buffer
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             event.sender.send('hermes:api-stream:chunk', { data: line.slice(6) })
@@ -16168,6 +16172,7 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
         if (buffer.startsWith('data: ')) {
           event.sender.send('hermes:api-stream:chunk', { data: buffer.slice(6) })
         }
+
         event.sender.send('hermes:api-stream:done', { ok: true })
       })
       res.on('error', err => {
@@ -16186,6 +16191,7 @@ ipcMain.on('hermes:api-stream', async (event, request) => {
     if (body) {
       req.write(body)
     }
+
     req.end()
   } catch (err) {
     event.sender.send('hermes:api-stream:done', {

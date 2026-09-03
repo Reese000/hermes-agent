@@ -164,9 +164,11 @@ export async function* enhancePromptStream(
 ): AsyncGenerator<string, void, unknown> {
   if (!window.hermesDesktop?.apiStream) {
     const res = await enhancePrompt(text, sessionId, profile)
+
     if (res.ok && res.enhanced) {
       yield res.enhanced
     }
+
     return
   }
 
@@ -189,16 +191,21 @@ export async function* enhancePromptStream(
           done = true
           donePayload = { ok: true }
           resolve?.()
+
           return
         }
+
         try {
           const parsed = JSON.parse(payload.data)
+
           if (parsed.error) {
             done = true
             donePayload = { ok: false, error: parsed.error }
             resolve?.()
+
             return
           }
+
           if (parsed.text) {
             chunks.push(parsed.text)
             resolve?.()
@@ -219,15 +226,18 @@ export async function* enhancePromptStream(
     done = true
     resolve?.()
   }
+
   signal?.addEventListener('abort', abortHandler)
 
   try {
     while (!done) {
       await new Promise<void>(r => { resolve = r })
+
       while (chunks.length > 0) {
         yield chunks.shift()!
       }
     }
+
     if (donePayload && !(donePayload as { ok: boolean }).ok) {
       throw new Error((donePayload as { error?: string }).error || 'Enhance failed')
     }

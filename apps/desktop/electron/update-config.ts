@@ -38,6 +38,7 @@ export function readUpdateConfigFile(configPath: string): { branch: string; auto
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'))
     const branch = typeof parsed?.branch === 'string' ? parsed.branch.trim() : ''
     const autoUpdate = parsed?.autoUpdate === false ? false : true
+
     return { branch: branch || DEFAULT_UPDATE_BRANCH, autoUpdate }
   } catch {
     return { branch: DEFAULT_UPDATE_BRANCH, autoUpdate: true }
@@ -59,6 +60,7 @@ export function writeUpdateConfigFile(configPath: string, config: { branch?: str
  * empty/`0` value must not disable updates by accident.
  */
 export function isAutoUpdateDisabled(configPath: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.HERMES_DESKTOP_NO_AUTO_UPDATE === '1') return true
+  if (env.HERMES_DESKTOP_NO_AUTO_UPDATE === '1') {return true}
+
   return readUpdateConfigFile(configPath).autoUpdate === false
 }

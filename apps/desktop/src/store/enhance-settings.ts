@@ -1,7 +1,7 @@
 import { atom } from 'nanostores'
 
-import { persistBoolean, persistString, storedBoolean, storedString } from '@/lib/storage'
 import type { ReasoningEffort } from '@/lib/reasoning-effort'
+import { persistBoolean, persistString, storedBoolean, storedString } from '@/lib/storage'
 
 // ── Enhance settings store ───────────────────────────────────────────────
 // Persists the prompt-enhancement feature's configuration to localStorage.
@@ -99,5 +99,6 @@ export function getEnhanceConfig() {
 /** Get the active profile's settings. */
 export function getActiveProfile(): EnhanceProfile {
   const profileKey = $enhanceProfile.get()
+
   return ENHANCE_PROFILES[profileKey] || ENHANCE_PROFILES.balanced
 }

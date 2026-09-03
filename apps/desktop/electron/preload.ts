@@ -227,17 +227,21 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   apiStream: (request, callbacks) => {
     const { onChunk, onDone } = callbacks
     const chunkHandler = (_event, payload) => onChunk(payload)
+
     const doneHandler = (_event, payload) => {
       cleanup()
       onDone(payload)
     }
+
     const cleanup = () => {
       ipcRenderer.removeListener('hermes:api-stream:chunk', chunkHandler)
       ipcRenderer.removeListener('hermes:api-stream:done', doneHandler)
     }
+
     ipcRenderer.on('hermes:api-stream:chunk', chunkHandler)
     ipcRenderer.on('hermes:api-stream:done', doneHandler)
     ipcRenderer.send('hermes:api-stream', request)
+
     return { dispose: cleanup }
   },
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),

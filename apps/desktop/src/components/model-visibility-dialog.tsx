@@ -111,10 +111,12 @@ export function ModelVisibilityDialog({
               if (stored) {
                 const providerPrefix = `${provider.slug}::`
                 const curatedIds = new Set(allFamilies.flatMap(f => [f.id, f.fastId].filter(Boolean)))
+
                 const extraFromVisible = [...stored]
                   .filter(key => key.startsWith(providerPrefix) && !isProviderSentinel(key))
                   .map(key => key.slice(providerPrefix.length))
                   .filter(model => !curatedIds.has(model))
+
                 for (const model of extraFromVisible) {
                   allFamilies.push({ id: model, fastId: null })
                 }
