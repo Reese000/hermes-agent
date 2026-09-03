@@ -594,14 +594,14 @@ function ContinuousWorkButton({ disabled }: { disabled: boolean }) {
       <Button
         aria-label={active ? c.continuousWorkActive : c.continuousWorkOff}
         aria-pressed={active}
-        className={cn(GHOST_ICON_BTN, 'p-0', active && ACTIVE_ICON_BTN)}
+        className={cn(GHOST_ICON_BTN, 'p-0', active && ACTIVE_ICON_BTN, !active && 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground')}
         disabled={disabled}
         onClick={handleClick}
         size="icon"
         type="button"
         variant="ghost"
       >
-        <Zap className={iconSize.sm} />
+        <RefreshCw className={iconSize.sm} />
       </Button>
     </Tip>
   )
