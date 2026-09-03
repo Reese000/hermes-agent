@@ -590,25 +590,38 @@ function ContinuousWorkButton({ disabled }: { disabled: boolean }) {
   }, [active])
 
   return (
-    <Tip label={active ? c.continuousWorkActive : c.continuousWorkOff}>
-      <Button
-        aria-label={active ? c.continuousWorkActive : c.continuousWorkOff}
-        aria-pressed={active}
-        className={cn(
-          'h-(--composer-control-size) shrink-0 gap-1.5 rounded-full px-2.5 text-xs font-medium',
-          active
-            ? 'bg-primary/15 text-primary hover:bg-primary/25'
-            : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground'
-        )}
-        disabled={disabled}
-        onClick={handleClick}
-        type="button"
-        variant="ghost"
-      >
-        <RefreshCw className={cn(iconSize.sm, active && 'animate-spin')} />
-        <span className="hidden sm:inline">{active ? 'On' : 'Off'}</span>
-      </Button>
-    </Tip>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="contents">
+          <Tip label={active ? c.continuousWorkActive : c.continuousWorkOff}>
+            <Button
+              aria-label={active ? c.continuousWorkActive : c.continuousWorkOff}
+              aria-pressed={active}
+              className={cn(GHOST_ICON_BTN, 'p-0', active && ACTIVE_ICON_BTN)}
+              disabled={disabled}
+              onClick={handleClick}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCw className={cn('size-4', active && 'animate-spin')} />
+            </Button>
+          </Tip>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-56">
+        <ContextMenuItem onSelect={handleClick}>
+          <Codicon name={active ? 'eye-closed' : 'check'} size="0.875rem" className="mr-2" />
+          {active ? 'Disable continuous work' : 'Enable continuous work'}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled>
+          <span className="text-xs text-muted-foreground">
+            {active ? 'Agent will keep working until all tasks are done' : 'Agent stops after each response'}
+          </span>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
