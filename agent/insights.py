@@ -45,6 +45,21 @@ def _fmt_est_cost(est_cost: float) -> str:
 
 
 
+def _edit_outcomes(days: int) -> Dict[str, Any]:
+    """Keep-rate summary for the insights report (W7).
+
+    Lives in its own database (``edit_outcomes.db``), so a missing or
+    unreadable ledger degrades to an empty section rather than taking the
+    whole report down with it.
+    """
+    try:
+        from agent.edit_outcomes import keep_rate_report
+
+        return keep_rate_report(days=days)
+    except Exception:
+        return {}
+
+
 def _estimate_cost(
     session_or_model: Dict[str, Any] | str,
     input_tokens: int = 0,
@@ -183,6 +198,7 @@ class InsightsEngine:
                 },
                 "activity": {},
                 "top_sessions": [],
+                "edits": _edit_outcomes(days),
             }
 
         # Compute insights
@@ -193,6 +209,7 @@ class InsightsEngine:
         skills = self._compute_skill_breakdown(skill_usage)
         activity = self._compute_activity_patterns(sessions)
         top_sessions = self._compute_top_sessions(sessions)
+        edits = _edit_outcomes(days)
 
         return {
             "days": days,
@@ -206,6 +223,7 @@ class InsightsEngine:
             "skills": skills,
             "activity": activity,
             "top_sessions": top_sessions,
+            "edits": edits,
         }
 
     def get_usage_breakdown(self, days: int = 30, source: str = None) -> Dict[str, Any]:
@@ -1127,6 +1145,15 @@ class InsightsEngine:
             for ts in report["top_sessions"]:
                 lines.append(f"  {ts['label']:<20} {ts['value']:<18} ({ts['date']}, {ts['session_id']})")
             lines.append("")
+
+        # Edit keep-rate (W7). Omitted entirely when the ledger is empty -
+        # a fresh install should not show a wall of zeroes.
+        try:
+            from agent.edit_outcomes import format_report as _format_edits
+
+            lines.extend(_format_edits(report.get("edits") or {}))
+        except Exception:
+            pass
 
         return "\n".join(lines)
 

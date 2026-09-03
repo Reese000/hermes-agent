@@ -313,4 +313,115 @@ def build_verify_on_stop_nudge(
     )
 
 
-__all__ = ["build_verify_on_stop_nudge", "verify_on_stop_enabled"]
+# ---------------------------------------------------------------------------
+# LSP ERROR diagnostic tracking — blocks turn end when the model introduced
+# errors it has not resolved.
+# ---------------------------------------------------------------------------
+
+# Per-file ERROR diagnostics introduced during the current turn.  Cleared for
+# a file when a subsequent edit to that file returns no diagnostics.
+_introduced_lsp_errors: dict[str, list[dict[str, Any]]] = {}
+
+
+def record_lsp_diagnostics(file_path: str, diagnostics: list[dict[str, Any]]) -> None:
+    """Track ERROR diagnostics introduced by an edit to *file_path*.
+
+    Only severity-1 (ERROR) entries are kept.  When *diagnostics* contains
+    no errors the file's entry is removed — the model fixed it.
+    """
+    errors = [d for d in diagnostics if (d.get("severity") or 1) == 1]
+    if errors:
+        _introduced_lsp_errors[file_path] = errors
+    else:
+        _introduced_lsp_errors.pop(file_path, None)
+
+
+def clear_lsp_diagnostics(file_path: str) -> None:
+    """Remove tracked diagnostics for *file_path* unconditionally."""
+    _introduced_lsp_errors.pop(file_path, None)
+
+
+def reset_lsp_error_tracking() -> None:
+    """Drop all tracked LSP errors (call at turn boundary)."""
+    _introduced_lsp_errors.clear()
+
+
+def build_lsp_error_nudge(
+    *,
+    attempts: int = 0,
+    max_attempts: int | None = None,
+) -> str | None:
+    """Return a synthetic follow-up when tracked LSP ERROR diagnostics remain.
+
+    Shares the **same** nudge cap as verify-on-stop:
+    :func:`agent.verify_hooks.max_verify_nudges`.  The caller passes the
+    same ``attempts`` counter (``_verification_stop_nudges``) so both
+    nudge kinds draw from one budget and the model can never loop forever.
+
+    Returns ``None`` when there are no unresolved errors, the cap has been
+    reached, the session is a messaging surface, or ``lsp.feedback_in_loop``
+    is ``False``.
+    """
+    if not _introduced_lsp_errors:
+        return None
+
+    if max_attempts is None:
+        from agent.verify_hooks import max_verify_nudges
+
+        max_attempts = max_verify_nudges()
+
+    if attempts >= max_attempts:
+        return None
+
+    # Gate: messaging surface (same check as verify-on-stop).
+    if _session_is_messaging_surface():
+        return None
+
+    # Gate: LSP feedback disabled in config.
+    try:
+        from agent.lsp.reporter import get_feedback_in_loop
+
+        if not get_feedback_in_loop():
+            return None
+    except Exception:
+        return None
+
+    # Build the nudge — every piece of attacker-controlled text is sanitized
+    # through _sanitize_field so hostile identifiers cannot inject instructions.
+    from agent.lsp.reporter import _sanitize_field
+
+    file_entries: list[str] = []
+    for fpath, diags in sorted(_introduced_lsp_errors.items()):
+        safe_path = _sanitize_field(fpath, limit=200)
+        diag_lines: list[str] = []
+        for d in diags:
+            msg = _sanitize_field(d.get("message", ""), limit=300)
+            code = _sanitize_field(d.get("code", ""), limit=80)
+            rng = d.get("range") or {}
+            start = rng.get("start") or {}
+            line = int(start.get("line", 0)) + 1
+            col = int(start.get("character", 0)) + 1
+            code_part = f" [{code}]" if code else ""
+            diag_lines.append(f"  - {safe_path}:{line}:{col}: {msg}{code_part}")
+        file_entries.append(f"- `{safe_path}`:\n" + "\n".join(diag_lines))
+
+    files_block = "\n".join(file_entries)
+
+    return (
+        "[System: Your last edit introduced LSP ERROR diagnostics that are "
+        "still unresolved. You MUST fix these errors before finishing.\n\n"
+        f"{files_block}\n\n"
+        "Fix the errors above, then verify the fix by re-editing the file. "
+        "If you cannot fix the error, explain the concrete blocker to the "
+        "user instead of ignoring the diagnostics.]"
+    )
+
+
+__all__ = [
+    "build_verify_on_stop_nudge",
+    "verify_on_stop_enabled",
+    "build_lsp_error_nudge",
+    "record_lsp_diagnostics",
+    "clear_lsp_diagnostics",
+    "reset_lsp_error_tracking",
+]

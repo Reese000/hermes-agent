@@ -153,62 +153,54 @@ _MAX_FACT_FILE_BYTES = 256 * 1024
 _GIT_TIMEOUT = 2.5
 
 
-# Per-model edit-format steering. Matching the edit tool format to how a model
-# was trained reduces mistakes and wasted reasoning (OpenAI/Codex handle
-# patch-style diffs best; Anthropic models — and most open-weight coding
-# models, whose RL scaffolds use str_replace-style editors — do best with
-# string-replacement). Our `patch` tool exposes both: mode="patch" (V4A
-# multi-file) and mode="replace" (find-and-swap). We nudge each family toward
-# its native format. Unknown families get nothing (the brief's neutral wording
-# stands). Substrings match the model id; aligned with TOOL_USE_ENFORCEMENT_MODELS.
-#
-# GPT/Codex get V4A for ALL edits, single-file included: in codex-rs,
-# apply_patch (V4A — apply_patch.lark) is the ONLY file editor, no
-# str_replace-style tool exists, and the shipped model prompts say to use
-# apply_patch even "for single file edits" — so a replace-mode nudge would
-# steer those models toward a format their first-party harness never taught
-# them.
-_EDIT_FORMAT_GUIDANCE: dict[str, tuple[tuple[str, ...], str]] = {
-    "patch": (
-        ("gpt", "codex"),
-        "- Edit format: author new files with `write_file`; for edits to "
-        "existing code use `patch` with `mode='patch'` (V4A diff) — including "
-        "single-file edits. It's the edit format you handle most reliably.",
-    ),
-    "replace": (
-        ("claude", "sonnet", "opus", "haiku",
-         "gemini", "gemma", "deepseek", "qwen", "kimi", "glm", "grok",
-         "hermes", "llama", "mistral", "devstral", "minimax"),
-        "- Edit format: author new files with `write_file`; for edits to "
-        "existing code prefer `patch` in `mode='replace'` — match a unique "
-        "snippet and swap it. Reach for `mode='patch'` (V4A) only when an edit "
-        "genuinely spans several files at once.",
-    ),
-}
-
-
 def _model_family(model: Optional[str]) -> Optional[str]:
     """Classify a model id into an edit-format family key, or ``None``.
 
-    Used to steer the coding posture toward the edit tool format a model was
-    trained on. Family-agnostic by design: an unrecognised model gets ``None``
-    and the operating brief's neutral edit wording applies.
+    Delegates to :func:`agent.harness_profiles.resolve_profile` for
+    longest-needle-wins resolution.  Returns the profile's ``edit_format``
+    (``"patch"`` or ``"replace"``) when a profile matches, or ``None`` for
+    unknown models (which get the generic profile with an empty
+    ``edit_format_line``).
     """
-    if not model:
+    from agent.harness_profiles import resolve_profile
+
+    profile = resolve_profile(model)
+    if profile.name == "generic" and not profile.edit_format_line:
         return None
-    lowered = model.lower()
-    for family, (needles, _line) in _EDIT_FORMAT_GUIDANCE.items():
-        if any(n in lowered for n in needles):
-            return family
-    return None
+    return profile.edit_format
+
+
+def _edit_escalation_line(model: Optional[str]) -> str:
+    """The family's edit-format fallback order, as one coding-brief line.
+
+    Consumes ``HarnessProfile.retry_format_chain``.  Depends only on the
+    model id, which is fixed for the session, so this stays cache-safe.
+    Returns ``""`` for any profile without a usable chain.
+
+    Gated on ``_model_family`` for the same reason ``_edit_format_line`` is:
+    an unknown model gets the generic profile, and the brief must stay
+    neutral for it rather than steering it toward a format nobody verified
+    it handles.
+    """
+    if _model_family(model) is None:
+        return ""
+    try:
+        from agent.edit_escalation import escalation_brief_line
+        from agent.harness_profiles import resolve_profile
+
+        return escalation_brief_line(resolve_profile(model))
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _edit_format_line(model: Optional[str]) -> str:
-    """The edit-format guidance line for this model's family (``""`` if none)."""
-    family = _model_family(model)
-    if family is None:
-        return ""
-    return _EDIT_FORMAT_GUIDANCE[family][1]
+    """The edit-format guidance line for this model's family (``""`` if none).
+
+    Delegates to :func:`agent.harness_profiles.resolve_profile`.
+    """
+    from agent.harness_profiles import resolve_profile
+
+    return resolve_profile(model).edit_format_line
 
 
 # Operating brief for the coding posture. Tool names referenced here (read_file,
@@ -376,6 +368,68 @@ def _coding_instructions(config: Optional[dict[str, Any]]) -> str:
     return str(raw or "").strip()
 
 
+def _agent_cfg_section(config: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """The ``agent`` config section, or ``{}`` when unavailable."""
+    if config is None:
+        try:
+            from hermes_cli.config import load_config_readonly
+
+            config = load_config_readonly()
+        except Exception:
+            return {}
+    section = (config or {}).get("agent", {})
+    return section if isinstance(section, dict) else {}
+
+
+def _repo_map_enabled(config: Optional[dict[str, Any]]) -> bool:
+    """Whether to build the repo map. Default True; any falsey config wins."""
+    try:
+        return bool(_agent_cfg_section(config).get("repo_map", True))
+    except Exception:
+        return True
+
+
+def _repo_map_char_budget(config: Optional[dict[str, Any]]) -> int:
+    """Hard character cap for the repo map. Invalid values fall back."""
+    from agent.repo_map import DEFAULT_CHAR_BUDGET
+
+    try:
+        raw = _agent_cfg_section(config).get(
+            "repo_map_char_budget", DEFAULT_CHAR_BUDGET
+        )
+        value = int(raw)
+    except (TypeError, ValueError, Exception):
+        return DEFAULT_CHAR_BUDGET
+    return value if value >= 0 else DEFAULT_CHAR_BUDGET
+
+
+def build_repo_map_block(
+    cwd: Optional[str | Path],
+    *,
+    enabled: bool = True,
+    char_budget: Optional[int] = None,
+) -> str:
+    """Repo-map system block for *cwd*, or ``""`` when disabled/unavailable.
+
+    Never raises: prompt assembly must not be breakable by a repo scan.
+    """
+    if not enabled:
+        return ""
+    try:
+        from agent.repo_map import DEFAULT_CHAR_BUDGET, build_repo_map
+
+        budget = DEFAULT_CHAR_BUDGET if char_budget is None else char_budget
+        if budget <= 0:
+            return ""
+        resolved = _resolve_cwd(cwd)
+        root = _git_root(resolved) or _marker_root(resolved)
+        if root is None:
+            return ""
+        return build_repo_map(root, char_budget=budget)
+    except Exception:
+        return ""
+
+
 def _resolve_cwd(cwd: Optional[str | Path]) -> Path:
     if cwd:
         return Path(cwd).expanduser()
@@ -493,6 +547,10 @@ class RuntimeMode:
     # Standing operator instructions (``agent.coding_instructions``), appended
     # as an extra stable system block. Empty unless the user configures it.
     instructions: str = ""
+    # Repository-map settings, resolved once from config at construction so
+    # ``system_blocks`` never re-reads config mid-session (cache safety).
+    repo_map_enabled: bool = True
+    repo_map_char_budget: int = 3200
 
     @property
     def kind(self) -> str:
@@ -557,10 +615,25 @@ class RuntimeMode:
             edit_line = _edit_format_line(self.model)
             if edit_line:
                 brief = f"{brief}\n{edit_line}"
+            escalation_line = _edit_escalation_line(self.model)
+            if escalation_line:
+                brief = f"{brief}\n{escalation_line}"
             prefix.append(brief)
         workspace = build_coding_workspace_block(self.cwd)
         if workspace:
             workspace_parts.append(workspace)
+
+        # Ranked repository map (W6a): a static "which symbols live where"
+        # block built once at session start and cached — it is part of the
+        # stable workspace tier, so prompt assembly keeps its cache boundary
+        # before the snapshot and the map rides alongside it.
+        repo_map = build_repo_map_block(
+            self.cwd,
+            enabled=self.repo_map_enabled,
+            char_budget=self.repo_map_char_budget,
+        )
+        if repo_map:
+            workspace_parts.append(repo_map)
         # Operator instructions ride their own block so the brief (block 0) stays
         # byte-stable and cache-keyed independently of user config.
         if self.instructions:
@@ -627,6 +700,8 @@ def resolve_runtime_mode(
         config_mode=mode,
         model=model,
         instructions=_coding_instructions(config),
+        repo_map_enabled=_repo_map_enabled(config),
+        repo_map_char_budget=_repo_map_char_budget(config),
     )
 
 

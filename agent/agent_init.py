@@ -2057,7 +2057,6 @@ def init_agent(
     # model-name substrings.  Independent of tool_use_enforcement — see
     # agent/system_prompt.py for the injection gate.
     agent._execution_guidance = _agent_section.get("execution_guidance", "auto")
-
     # Wall-clock run budget from config (agent.run_budget_seconds) — only
     # consulted when the constructor arg was not given. Absent/None/invalid
     # keeps the feature fully off (zero behavior change in the default path).
@@ -2065,7 +2064,6 @@ def init_agent(
         agent.run_budget_seconds = _normalize_run_budget_seconds(
             _agent_section.get("run_budget_seconds")
         )
-
     # Empty-response retry guard config (NS-503): additive
     # ``agent.empty_response_guard`` subsection. Resolution is tolerant —
     # a malformed section falls back to the schema defaults (guard on,
@@ -2075,6 +2073,50 @@ def init_agent(
         agent._empty_guard_enabled,
         agent._empty_guard_cost_threshold_usd,
     ) = resolve_guard_settings(_agent_section.get("empty_response_guard"))
+
+    # Harness profile: resolved once at session start from the model id.
+    # "auto" (default) — resolve from model id via agent.harness_profiles.
+    # "<profile name>" — force a specific profile (e.g. "mimo", "openai").
+    # "off" — use the generic profile (no model-specific guidance).
+    # This is the single resolution point — nothing re-resolves per turn.
+    from agent.harness_profiles import resolve_profile, get_profile_by_name, GENERIC_PROFILE
+    _hp_cfg = str(_agent_section.get("harness_profile", "auto")).strip().lower()
+    if _hp_cfg == "off":
+        agent._harness_profile = GENERIC_PROFILE
+    elif _hp_cfg == "auto":
+        agent._harness_profile = resolve_profile(agent.model, provider=agent.provider)
+    else:
+        agent._harness_profile = get_profile_by_name(_hp_cfg)
+        if agent._harness_profile.name == "generic" and _hp_cfg != "generic":
+            # Unknown profile name — fall back to auto-resolution
+            agent._harness_profile = resolve_profile(agent.model, provider=agent.provider)
+    # Per-model tool descriptions (W2).  The profile resolves *after* the
+    # initial agent.tools build (which needs config that is loaded later), so
+    # re-materialise the schemas here when — and only when — this profile
+    # actually overrides something.  For every profile with no overrides this
+    # branch never runs and agent.tools is untouched, so the default output
+    # stays byte-identical.
+    #
+    # Cache-safety: the profile is resolved exactly once per session (above),
+    # so the descriptions the model sees are fixed for the whole conversation
+    # even across a mid-conversation model failover.  Nothing here re-runs
+    # per turn, so the cached prompt prefix is never invalidated.
+    if getattr(agent._harness_profile, "tool_description_overrides", None) or getattr(
+        agent._harness_profile, "tool_description_appends", None
+    ):
+        try:
+            agent.tools = _ra().get_tool_definitions(
+                enabled_toolsets=enabled_toolsets,
+                disabled_toolsets=disabled_toolsets,
+                quiet_mode=agent.quiet_mode,
+                harness_profile=agent._harness_profile,
+            )
+        except Exception:
+            logger.debug(
+                "per-model tool description override failed; "
+                "keeping default schemas",
+                exc_info=True,
+            )
 
     # Intent-ack continuation config: "auto" (default — codex_responses only,
     # the historical gate), true (all api_modes), false (never), or a list of

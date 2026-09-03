@@ -1148,42 +1148,52 @@ _file_ops_cache: dict = {}
 _read_tracker_lock = threading.Lock()
 _read_tracker: dict = {}
 
-# Track consecutive patch failures per (task_id, resolved_path).  Used to
-# escalate the hint when the model repeatedly fails to patch the same file
-# (typical cause: stale view of file contents, ambiguous old_string, or
-# the file was modified externally between the agent's read and patch
-# attempt).  Reset on a successful patch to that path.
-_patch_failure_lock = threading.Lock()
-_patch_failure_tracker: dict = {}  # {task_id: {resolved_path: count}}
+# Consecutive patch failures per (task_id, resolved_path) live in
+# agent.edit_escalation, which owns the counter, the eviction cap, and the
+# escalation text.  What stays here is the classifier deciding which
+# failures are worth counting at all.
+#: Error fragments that mean "the text you sent does not match the file".
+#: Escalation is only useful for these: a permission denial or a missing
+#: file is not fixed by switching edit format, and counting it would push
+#: the model toward write_file for a problem write_file also hits.
+_STALE_CONTENT_MARKERS = (
+    "could not find",          # replace mode, no fuzzy match
+    "not found in",            # V4A hunk context miss
+    "patch validation failed",  # V4A pre-apply check
+    "apply phase failed",       # V4A mid-apply failure
+    "post-write verification",  # wrote, but disk disagrees
+)
+
+
+def _is_stale_content_failure(error_text: str) -> bool:
+    """Whether *error_text* is an edit failure a re-read could fix."""
+    if not error_text:
+        return False
+    lowered = error_text.lower()
+    return any(marker in lowered for marker in _STALE_CONTENT_MARKERS)
 
 
 def _record_patch_failure(task_id: str, resolved_path: str) -> int:
-    """Increment and return the consecutive-failure count for this path."""
-    with _patch_failure_lock:
-        task_failures = _patch_failure_tracker.setdefault(task_id, {})
-        # Cap dict size per task to avoid unbounded growth in long sessions
-        # where the agent fails on many distinct files.  64 distinct
-        # failing files per task is generous; older entries get evicted.
-        if len(task_failures) >= 64 and resolved_path not in task_failures:
-            try:
-                first_key = next(iter(task_failures))
-                del task_failures[first_key]
-            except StopIteration:
-                pass
-        task_failures[resolved_path] = task_failures.get(resolved_path, 0) + 1
-        return task_failures[resolved_path]
+    """Increment and return the consecutive-failure count for this path.
+
+    Delegates to :mod:`agent.edit_escalation`, which owns the counter, the
+    per-scope eviction cap, and the escalation text.  Keeping a second
+    counter here would give the model two nudges disagreeing about how many
+    times it has failed.
+    """
+    from agent.edit_escalation import record_failure
+
+    return record_failure(task_id, resolved_path)
 
 
 def _reset_patch_failures(task_id: str, resolved_paths: list) -> None:
     """Clear consecutive-failure counts for the given paths."""
     if not resolved_paths:
         return
-    with _patch_failure_lock:
-        task_failures = _patch_failure_tracker.get(task_id)
-        if not task_failures:
-            return
-        for rp in resolved_paths:
-            task_failures.pop(rp, None)
+    from agent.edit_escalation import record_success
+
+    for rp in resolved_paths:
+        record_success(task_id, rp)
 
 # Per-task bounds for the containers inside each _read_tracker[task_id].
 # A CLI session uses one stable task_id for its lifetime; without these
@@ -1610,11 +1620,14 @@ def clear_file_ops_cache(task_id: str = None):
         else:
             _read_tracker.clear()
 
-    with _patch_failure_lock:
-        if task_id:
-            _patch_failure_tracker.pop(task_id, None)
-        else:
-            _patch_failure_tracker.clear()
+    # Consecutive-failure counters live in agent.edit_escalation (per-scope
+    # refactor); clear them here so a finished task never leaves stale
+    # escalation state behind, matching the old _patch_failure_tracker clear.
+    try:
+        from agent.edit_escalation import reset as _reset_patch_failure_state
+        _reset_patch_failure_state(task_id if task_id else None)
+    except ImportError:
+        pass
 
     if task_id:
         file_state.get_registry().forget_task(task_id)
@@ -2041,6 +2054,13 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 2000, task_id: str =
                 "If you are stuck in a loop, stop reading and proceed with writing or responding."
             )
 
+        # Point-of-use context discovery (W6b).  Repetition is already
+        # prevented upstream: an unchanged re-read of the same region
+        # returns the dedup stub and never reaches here.  A read that
+        # does reach here saw new content, which is exactly when a
+        # refreshed view of the file's relationships is worth having.
+        _attach_related_context(result_dict, _resolved, task_id)
+
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
         return tool_error(str(e))
@@ -2194,6 +2214,85 @@ def _check_file_staleness(filepath: str, task_id: str) -> str | None:
     return None
 
 
+def _record_edit_outcome(
+    session_id,
+    paths,
+    edit_format: str,
+    status: str,
+    removed_text: str | None = None,
+    added_text: str | None = None,
+) -> None:
+    """Best-effort append to the edit keep-rate ledger (W7).
+
+    Passive by design: the ledger is read by ``/insights``, never by the
+    agent loop, and a failure here must never affect the edit that just
+    happened.
+    """
+    try:
+        from agent.edit_outcomes import record_edit
+
+        for _p in paths or []:
+            if not _p:
+                continue
+            record_edit(
+                session_id=session_id,
+                path=_p,
+                edit_format=edit_format,
+                status=status,
+                removed_text=removed_text,
+                added_text=added_text,
+            )
+    except Exception:
+        logger.debug("edit outcome ledger write failed", exc_info=True)
+
+
+def _try_edit_delegation(path, old_string, new_string, error_text, retry):
+    """Ask the editor model to re-anchor a failed replace (W5).
+
+    *retry* is called with the delegation result and must re-attempt the
+    edit; its return value is passed straight back. Returns ``None`` to
+    fall through to the ordinary escalation hint.  Best-effort and silent: an optional recovery
+    must never turn a failed edit into a failed tool call.
+    """
+    try:
+        from agent.edit_delegate import delegate_edit
+
+        # delegate_edit owns the re-entrancy scope and calls retry inside
+        # it, so the retry cannot delegate again if it also misses.
+        return delegate_edit(
+            path=path,
+            old_string=old_string,
+            new_string=new_string,
+            error_text=error_text,
+            retry=retry,
+        )
+    except Exception:
+        logger.debug("edit delegation failed", exc_info=True)
+        return None
+
+
+def _attach_related_context(result_dict: dict, resolved_path, task_id: str) -> None:
+    """Attach the point-of-use related-files footer to a read result (W6b).
+
+    Best-effort and silent: a navigation hint must never fail a file read.
+    The footer rides in this per-turn tool result only - it never touches
+    the cached system prompt.
+    """
+    try:
+        from agent.coding_context import _git_root, _marker_root
+        from agent.related_context import related_context
+
+        start = Path(resolved_path).parent
+        root = _git_root(start) or _marker_root(start)
+        if root is None:
+            return
+        footer = related_context(resolved_path, root)
+        if footer:
+            result_dict["_related"] = footer
+    except Exception:
+        logger.debug("related-context footer failed", exc_info=True)
+
+
 def _mark_verification_stale(
     task_id: str,
     resolved_paths: list[str],
@@ -2323,6 +2422,10 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
                 result_dict["_warning"] = stale_warning
             if not result_dict.get("error"):
                 _mark_verification_stale(task_id, [path], session_id=session_id)
+                _record_edit_outcome(
+                    session_id or task_id, [path], "write_file", "applied",
+                    added_text=content,
+                )
             _update_read_timestamp(path, task_id)
             return json.dumps(result_dict, ensure_ascii=False)
 
@@ -2350,6 +2453,10 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
             if not result_dict.get("error"):
                 result_dict["files_modified"] = [_resolved]
                 _mark_verification_stale(task_id, [_resolved], session_id=session_id)
+                _record_edit_outcome(
+                    session_id or task_id, [_resolved], "write_file", "applied",
+                    added_text=content,
+                )
             # Refresh stamps after the successful write so consecutive
             # writes by this task don't trigger false staleness warnings.
             _update_read_timestamp(path, task_id)
@@ -2544,40 +2651,92 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 _reset_patch_failures(task_id, [
                     _r for _r in (_path_to_resolved.get(_p) for _p in _paths_to_check) if _r
                 ])
-        # Hint when old_string not found — saves iterations where the agent
-        # retries with stale content instead of re-reading the file.
-        # Suppressed when patch_replace already attached a rich "Did you mean?"
-        # snippet (which is strictly more useful than the generic hint).
-        if result_dict.get("error") and "Could not find" in str(result_dict["error"]):
-            # Track per-file consecutive failures for replace mode.  The
-            # ``path`` arg only exists for replace mode; for V4A patches
-            # we'd need to walk the headers, but in practice V4A failures
-            # are far rarer and the existing _hint covers them adequately.
-            failure_count = 0
-            if mode == "replace" and path:
-                resolved = _path_to_resolved.get(path) or path
-                failure_count = _record_patch_failure(task_id, resolved)
-
-            if failure_count >= 3:
-                # Escalating hint after multiple consecutive failures on the
-                # same path.  Most common cause is a stale view of the file —
-                # the model is retrying with the same old_string against
-                # content that has since changed.  Surface the failure count
-                # so the model recognises it's in a loop and breaks out by
-                # re-reading or falling back to write_file.
-                result_dict["_hint"] = (
-                    f"This is failure #{failure_count} patching {path!r}. "
-                    "Stop retrying with variations of the same old_string. "
-                    "Either: (1) re-read the file fresh to verify current "
-                    "content, (2) use a longer / more unique old_string with "
-                    "surrounding context lines, or (3) use write_file to "
-                    "replace the entire file if the targeted region is hard "
-                    "to anchor."
+                # Keep-rate ledger (W7). Replace mode knows exactly what it
+                # removed and added; V4A does not expose per-file text here,
+                # so it is recorded without hashes and scored only on the
+                # rates and on later whole-file overwrites.
+                _record_edit_outcome(
+                    session_id or task_id, _resolved_modified, mode, "applied",
+                    removed_text=old_string if mode == "replace" else None,
+                    added_text=new_string if mode == "replace" else None,
                 )
-            elif "Did you mean one of these sections?" not in str(result_dict["error"]):
-                result_dict["_hint"] = (
-                    "old_string not found. Use read_file to verify the current "
-                    "content, or search_files to locate the text."
+        # Hint when the edit did not land — saves iterations where the agent
+        # retries with stale content instead of re-reading the file.
+        _err_text = str(result_dict.get("error") or "")
+        if _is_stale_content_failure(_err_text):
+            # Track per-file consecutive failures. Replace mode carries an
+            # explicit ``path``; V4A headers were resolved above.
+            _failed_path = None
+            if mode == "replace" and path:
+                _failed_path = _path_to_resolved.get(path) or path
+            elif mode == "patch":
+                # V4A headers are already resolved above; escalate against the
+                # first one, since the counter is per file and a multi-file
+                # patch that fails almost always fails on its first target.
+                for _p in _paths_to_check:
+                    _failed_path = _path_to_resolved.get(_p) or _p
+                    if _failed_path:
+                        break
+
+            from agent.edit_escalation import ESCALATE_AFTER, escalation_hint
+
+            escalation = ""
+            _attempts = 0
+            if _failed_path:
+                _attempts = _record_patch_failure(task_id, _failed_path)
+                escalation = escalation_hint(task_id, _failed_path, mode)
+
+            # Architect/editor split (W5). The cheap advice above gets its
+            # turn first; only once the format chain has failed to land the
+            # edit is it worth paying for a second model. Replace mode only:
+            # it is the one shape where the intent is unambiguous, and the
+            # editor is asked solely to correct WHERE - new_string is the
+            # architect's own, reused verbatim.
+            from agent.edit_delegate import DELEGATE_AFTER
+
+            if (
+                mode == "replace"
+                and _failed_path
+                and _attempts >= DELEGATE_AFTER
+                and old_string
+            ):
+                def _retry_delegated(_d):
+                    _r = json.loads(patch_tool(
+                        mode="replace",
+                        path=path,
+                        old_string=_d["old_string"],
+                        new_string=new_string,
+                        task_id=task_id,
+                        session_id=session_id,
+                    ))
+                    if _r.get("error"):
+                        return None
+                    _r["_hint"] = _d["note"]
+                    return json.dumps(_r, ensure_ascii=False)
+
+                _rescued = _try_edit_delegation(
+                    _failed_path, old_string, new_string, _err_text,
+                    _retry_delegated,
+                )
+                if _rescued:
+                    return _rescued
+
+            # patch_replace may already have attached a "Did you mean one of
+            # these sections?" snippet, which is strictly more useful than
+            # generic first-failure advice. Let it stand alone - but never
+            # suppress the format-switch escalation, which says something the
+            # snippet does not.
+            if escalation and (
+                _attempts >= ESCALATE_AFTER
+                or "Did you mean one of these sections?" not in _err_text
+            ):
+                result_dict["_hint"] = escalation
+
+            # Keep-rate ledger (W7): a failed edit is as much a signal as a
+            # kept one - it is the denominator of the apply rate.
+            if _failed_path:
+                _record_edit_outcome(
+                    session_id or task_id, [_failed_path], mode, "failed"
                 )
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:

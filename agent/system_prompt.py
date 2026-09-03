@@ -31,11 +31,11 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
+from agent.harness_profiles import resolve_profile
 from agent.prompt_builder import (
     CONTINUOUS_WORK_GUIDANCE,
     DEFAULT_AGENT_IDENTITY,
     EXECUTION_GUIDANCE_MODELS,
-    GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     HERMES_AGENT_HELP_GUIDANCE,
     HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS,
     KANBAN_GUIDANCE,
@@ -50,7 +50,6 @@ from agent.prompt_builder import (
     TASK_COMPLETION_GUIDANCE,
     TELEGRAM_RICH_MESSAGES_HINT,
     TOOL_USE_ENFORCEMENT_GUIDANCE,
-    TOOL_USE_ENFORCEMENT_MODELS,
     drain_truncation_warnings,
 )
 from agent.runtime_cwd import resolve_context_cwd
@@ -569,7 +568,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # Tool-use enforcement: tells the model to actually call tools instead
     # of describing intended actions.  Controlled by config.yaml
     # agent.tool_use_enforcement:
-    #   "auto" (default) — matches TOOL_USE_ENFORCEMENT_MODELS
+    #   "auto" (default) — delegates to the harness profile's
+    #                      tool_use_enforcement field (see agent/harness_profiles)
     #   true  — always inject (all models)
     #   false — never inject
     #   list  — custom model-name substrings to match
@@ -584,16 +584,19 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             model_lower = (agent.model or "").lower()
             _inject = any(p.lower() in model_lower for p in _enforce if isinstance(p, str))
         else:
-            # "auto" or any unrecognised value — use hardcoded defaults
-            model_lower = (agent.model or "").lower()
-            _inject = any(p in model_lower for p in TOOL_USE_ENFORCEMENT_MODELS)
+            # "auto" or any unrecognised value — delegate to the harness
+            # profile resolved at session start (see agent/agent_init.py).
+            _hp = getattr(agent, "_harness_profile", None)
+            if _hp is None:
+                _hp = resolve_profile(agent.model, getattr(agent, "provider", None))
+            _inject = _hp.tool_use_enforcement
         if _inject:
             stable_parts.append(TOOL_USE_ENFORCEMENT_GUIDANCE)
-            _model_lower = (agent.model or "").lower()
-            # Google model operational guidance (conciseness, absolute
-            # paths, parallel tool calls, verify-before-edit, etc.)
-            if "gemini" in _model_lower or "gemma" in _model_lower:
-                stable_parts.append(GOOGLE_MODEL_OPERATIONAL_GUIDANCE)
+        # Google-model operational guidance (conciseness, absolute paths,
+        # parallel tool calls, verify-before-edit) is carried by the google
+        # harness profile's execution_guidance (see agent/harness_profiles/
+        # profiles.py) — injected via the execution-guidance block below,
+        # never by raw model-substring checks here.
 
     # Execution-discipline guidance (tool persistence, mandatory tool use
     # for arithmetic, external-write read-back, count reconciliation,
@@ -611,10 +614,17 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     if agent.valid_tool_names:
         _exec_guidance = getattr(agent, "_execution_guidance", "auto")
         _exec_inject = False
+        _exec_suppressed = False
+        # Only "auto" (or an unrecognised value) may fall back to the
+        # harness profile's family-specific guidance.  An explicit
+        # true/false/list whitelist fully governs injection — the list
+        # semantic is "these models, and none other".
+        _exec_allow_profile_fallback = False
         if _exec_guidance is True or (isinstance(_exec_guidance, str) and _exec_guidance.lower() in {"true", "always", "yes", "on"}):
             _exec_inject = True
         elif _exec_guidance is False or (isinstance(_exec_guidance, str) and _exec_guidance.lower() in {"false", "never", "no", "off"}):
             _exec_inject = False
+            _exec_suppressed = True
         elif isinstance(_exec_guidance, list):
             model_lower = (agent.model or "").lower()
             _exec_inject = any(p.lower() in model_lower for p in _exec_guidance if isinstance(p, str))
@@ -622,9 +632,21 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             # "auto" or any unrecognised value — use hardcoded defaults
             model_lower = (agent.model or "").lower()
             _exec_inject = any(p in model_lower for p in EXECUTION_GUIDANCE_MODELS)
+            # In auto mode a model outside the default set still gets its
+            # harness-profile guidance (e.g. MiMo, Google) — the family
+            # block is the accurate text for it, not nothing.
+            _exec_allow_profile_fallback = True
         if _exec_inject:
             from agent.prompt_builder import execution_guidance_text
             stable_parts.append(execution_guidance_text(agent.valid_tool_names))
+        elif _exec_allow_profile_fallback and not _exec_suppressed:
+            # Harness-profile execution guidance (W2): family-specific block
+            # for models outside EXECUTION_GUIDANCE_MODELS under auto mode.
+            _hp = getattr(agent, "_harness_profile", None)
+            if _hp is None:
+                _hp = resolve_profile(agent.model, getattr(agent, "provider", None))
+            if _hp.execution_guidance:
+                stable_parts.append(_hp.execution_guidance)
 
     has_skills_tools = any(name in agent.valid_tool_names for name in ['skills_list', 'skill_view', 'skill_manage'])
     if has_skills_tools:

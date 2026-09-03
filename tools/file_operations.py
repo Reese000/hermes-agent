@@ -3387,9 +3387,21 @@ class ShellFileOperations(FileOperations):
 
         Skipped entirely on non-local backends (Docker, Modal, SSH,
         etc.) — same reasoning as ``_snapshot_lsp_baseline``.
+
+        When ``lsp.feedback_in_loop`` is ``False`` in config, the
+        LSP service still runs for other consumers but the
+        model-facing diagnostics are suppressed (returns ``""``).
         """
         if not self._lsp_local_only():
             return ""
+        # Check feedback_in_loop early: when False, suppress model-facing
+        # diagnostics but let LSP continue for other consumers.
+        try:
+            from agent.lsp.reporter import get_feedback_in_loop
+            if not get_feedback_in_loop():
+                return ""
+        except Exception:  # noqa: BLE001
+            pass
         try:
             from agent.lsp import get_service
         except Exception:  # noqa: BLE001
@@ -3416,6 +3428,16 @@ class ShellFileOperations(FileOperations):
             diagnostics = svc.get_diagnostics_sync(path, delta=True, line_shift=line_shift)
         except Exception:  # noqa: BLE001
             return ""
+        # Record structured diagnostics for the LSP error-nudge gate.
+        # Called BEFORE the early-return on empty so that a file the model
+        # *fixed* (empty diagnostics) clears it from tracking.  Only
+        # reached when feedback_in_loop is True (the gate above returned
+        # early otherwise).
+        try:
+            from agent.verification_stop import record_lsp_diagnostics
+            record_lsp_diagnostics(path, diagnostics)
+        except Exception:  # noqa: BLE001
+            pass
         if not diagnostics:
             return ""
         try:
