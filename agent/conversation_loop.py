@@ -9008,6 +9008,58 @@ def run_conversation(
                     final_response = None
                     continue
 
+                # Continuous-work enforcement gate: when continuous work is ON
+                # for this conversation, the agent cannot stop with a bare
+                # completion claim unless it performed real work (a work-evidence
+                # tool call) this turn OR explicitly declared an override. This
+                # is a hard runtime gate, not a prompt nudge — it re-injects a
+                # synthetic follow-up and runs the agent again, bounded by
+                # _continuous_work_nudges so a stubby loop can't run forever.
+                _cw_nudge = None
+                if getattr(agent, "_continuous_work", False):
+                    try:
+                        from agent.continuous_work_gate import (
+                            build_continuous_work_nudge,
+                            mark_continuous_work_nudge_issued,
+                        )
+
+                        _cw_nudge = build_continuous_work_nudge(
+                            final_response=final_response,
+                            work_evidence_tools=getattr(
+                                agent, "_continuous_work_evidence_tools", 0
+                            ),
+                            attempts=getattr(agent, "_continuous_work_nudges", 0),
+                        )
+                    except Exception:
+                        logger.debug("continuous-work gate check failed", exc_info=True)
+                        _cw_nudge = None
+
+                if _cw_nudge:
+                    mark_continuous_work_nudge_issued(agent)
+                    final_msg["finish_reason"] = "continuous_work_required"
+                    # The attempted final answer is real content — persist and
+                    # surface it as an interim message so the user sees what was
+                    # rejected before the continuation runs. Only the nudge is
+                    # synthetic (stripped from the durable transcript).
+                    agent._emit_interim_assistant_message(final_msg)
+                    append_message(messages, final_msg)
+                    try:
+                        agent._flush_messages_to_session_db(messages, conversation_history)
+                    except Exception:
+                        logger.debug("continuous-work interim flush failed", exc_info=True)
+                    append_message(messages, {
+                        "role": "user",
+                        "content": _cw_nudge,
+                        "_continuous_work_synthetic": True,
+                    })
+                    agent._session_messages = messages
+                    logger.debug(
+                        "continuous-work gate nudge issued (attempt %d)",
+                        getattr(agent, "_continuous_work_nudges", 0),
+                    )
+                    final_response = None
+                    continue
+
                 # User verification-loop gate: when the agent edited code this
                 # turn, let a registered `pre_verify` hook (plugin/shell) keep it
                 # going one more turn. The shipped guidance is folded into the

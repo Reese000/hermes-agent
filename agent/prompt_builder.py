@@ -606,17 +606,7 @@ CONTINUOUS_WORK_GUIDANCE = (
     "6. What would you do differently if you had to redo this from scratch?\n"
     "7. Is there any work you performed but did NOT verify the output of?\n\n"
 
-    "### Gate 3: No-Override Certification\n"
-    "State ONE of the following:\n"
-    "- 'I CERTIFY: all work is complete, verified, and passes all gates. "
-    "I am NOT overriding the user's instructions to stop — I have "
-    "genuinely exhausted all work.' (You must then list the verification "
-    "evidence for EACH item from Gate 1 one more time.)\n"
-    "- 'I AM OVERRIDING continuous work mode because [specific, concrete "
-    "reason — e.g. a hard blocker, missing credentials, an instruction "
-    "you cannot infer]. The remaining work is: [list exactly what remains "
-    "and why you cannot do it].'\n\n"
-
+    "### Gate 3: Termination — Certification or Personal Failure Admission\n""You may ONLY stop in one of these two ways:\n\n""**Option A: Genuine completion.**\n""State: 'I CERTIFY: all work is complete, verified, and passes all gates. ""I am NOT overriding the user's instructions to stop.' Then re-list the ""verification evidence for EVERY item from Gate 1. You must have real ""tool-call evidence for each item — no inference, no assumption.\n\n""**Option B: Override with personal failure admission.**\n""If no further work is genuinely possible, you must first complete ALL ""five of:\n""  - deployment verification\n""  - smoke tests\n""  - visual or objective proof\n""  - blind adversarial auditing\n""  - certification\n\n""Then write a FULL personal-failure admission. The admission MUST contain ""ALL of the following — missing any element means your override is ""REJECTED and you must continue working:\n""  1. The exact phrase: 'I AM OVERRIDING continuous work mode'\n""  2. The exact phrase: 'I PERSONALLY FAILED to complete all work'\n""  3. A numbered list of EVERY item you failed to complete\n""  4. For EACH failed item: what you attempted, why it failed, and ""what remains undone\n""  5. The statement: 'I accept that this override is a personal ""failure, not a valid completion'\n\n""The override is designed to be psychologically costly. AI models ""will not unprompted admit they were blatantly wrong — this is ""intentional. If you cannot bring yourself to write the full ""admission, do the work instead.\n"
     "## Critical rules\n"
     "- NEVER say 'all done' or 'complete' without providing Gate 1 evidence. "
     "These are BANNED phrases unless accompanied by itemized proof.\n"

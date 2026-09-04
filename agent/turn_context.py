@@ -1546,6 +1546,12 @@ def build_turn_context(
     agent._turn_file_mutation_paths = set()
     agent._verification_stop_nudges = 0
     agent._pre_verify_nudges = 0
+    # Per-turn continuous-work enforcement: how many work-evidence tool calls
+    # (mutating/verifying tools) actually executed this turn. The turn-end CW
+    # gate refuses a bare "done" when this is 0 and no override is declared.
+    agent._continuous_work_evidence_tools = 0
+    # Bounded re-injection budget for the CW enforcement gate.
+    agent._continuous_work_nudges = 0
 
     # Record the execution thread so interrupt()/clear_interrupt() can scope
     # the tool-level interrupt signal to THIS agent's thread only.

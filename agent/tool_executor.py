@@ -55,6 +55,30 @@ from tools.budget_config import BudgetConfig, DEFAULT_BUDGET, budget_for_context
 
 logger = logging.getLogger(__name__)
 
+# Tool calls that count as "real work" for the continuous-work enforcement
+# gate: they execute code, mutate files, run commands, navigate a browser,
+# delegate work, send messages, or manage background processes — as opposed
+# to read-only lookups (read_file, search_files, web_search) that prove no
+# progress on their own. A successful non-error call to one of these proves
+# the agent DID something this turn; the turn-end CW gate refuses a bare
+# "done" when none ran and no override is declared.
+_CONTINUOUS_WORK_EVIDENCE_TOOLS = frozenset(
+    {
+        "terminal",
+        "execute_code",
+        "write_file",
+        "patch",
+        "browser_click",
+        "browser_type",
+        "browser_press",
+        "browser_scroll",
+        "browser_navigate",
+        "send_message",
+        "delegate_task",
+        "process_manage",
+    }
+)
+
 
 def _pairing_tool_call_id(tool_call: Any) -> str:
     """Return the canonical id used by the persisted assistant message."""
@@ -1810,6 +1834,20 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                     )
                 except Exception as _ver_err:
                     logging.debug("file-mutation verifier record failed: %s", _ver_err)
+
+            # Continuous-work evidence: a successful, non-error call to a
+            # work-performing/tool that executes or mutates (as opposed to a
+            # read-only lookup) proves the agent actually DID something this
+            # turn. The turn-end CW gate uses this to refuse a bare "done".
+            if (
+                not blocked
+                and not is_error
+                and hasattr(agent, "_continuous_work_evidence_tools")
+                and function_name in _CONTINUOUS_WORK_EVIDENCE_TOOLS
+            ):
+                agent._continuous_work_evidence_tools = (
+                    getattr(agent, "_continuous_work_evidence_tools", 0) + 1
+                )
 
             if agent.verbose_logging:
                 logging.debug("Tool %s completed in %.2fs", function_name, tool_duration)
