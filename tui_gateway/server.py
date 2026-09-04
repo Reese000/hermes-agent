@@ -13013,6 +13013,15 @@ def _continuous_work_note(session: dict) -> str:
         return ""
     from agent.prompt_builder import CONTINUOUS_WORK_GUIDANCE
 
+    # Keep the agent's own override flag in sync so the turn-end enforcement
+    # gate (agent/continuous_work_gate.py) can refuse a bare "done" when the
+    # chat enabled continuous work mid-session on an already-built agent.
+    _agent = session.get("agent")
+    if _agent is not None:
+        try:
+            _agent._continuous_work = True
+        except Exception:
+            pass
     return CONTINUOUS_WORK_GUIDANCE
 
 
