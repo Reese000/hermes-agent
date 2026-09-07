@@ -9091,11 +9091,15 @@ def run_conversation(
                 if _cw_nudge:
                     # HARD CEILING: prevent infinite CW loops regardless of
                     # parser behavior. If the agent has been nudged more than
-                    # MAX_CW_NUDGES times in a single turn, force it to stop.
-                    # This is defense-in-depth — the parser fix should prevent
-                    # false rejections, but this guard ensures no agent can get
-                    # stuck in an infinite loop even with old code.
-                    MAX_CW_NUDGES = 5
+                    # continuous_work_max_nudges times in a single turn, force
+                    # it to stop. This is defense-in-depth — the parser fix
+                    # should prevent false rejections, but this guard ensures
+                    # no agent can get stuck in an infinite loop even with old
+                    # code. Configurable via agent.continuous_work_max_nudges.
+                    _agent_cfg = getattr(agent, "_agent_cfg", {}) or {}
+                    if not isinstance(_agent_cfg, dict):
+                        _agent_cfg = {}
+                    MAX_CW_NUDGES = int(_agent_cfg.get("continuous_work_max_nudges", 5))
                     _nudge_count = getattr(agent, "_continuous_work_nudges", 0)
                     if _nudge_count >= MAX_CW_NUDGES:
                         logger.warning(
