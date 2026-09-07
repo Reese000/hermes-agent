@@ -3544,6 +3544,32 @@ def _(rid, params: dict) -> dict:
     return _ok(rid, {"status": "interrupted"})
 
 
+@method("session.set_continuous_work")
+def _(rid, params: dict) -> dict:
+    """Toggle continuous-work mode mid-turn.
+
+    Unlike the per-submit ``continuous_work`` flag (which only takes effect at
+    turn start), this RPC updates the agent's ``_continuous_work`` attribute
+    immediately so the turn-end CW gate sees the change on the current turn.
+
+    The frontend calls this when the user clicks the CW statusbar toggle while
+    the agent is running — the flag propagates without waiting for the next turn.
+    """
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    enabled = bool(params.get("enabled", False))
+    with session["history_lock"]:
+        session["continuous_work"] = enabled
+        _agent = session.get("agent")
+        if _agent is not None:
+            try:
+                _agent._continuous_work = enabled
+            except Exception:
+                pass
+    return _ok(rid, {"continuous_work": enabled})
+
+
 @method("delegation.status")
 def _(rid, params: dict) -> dict:
     from tools.delegate_tool import (

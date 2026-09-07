@@ -16,8 +16,15 @@ import { $continuousWorkBySession, setContinuousWorkForSession } from '@/store/c
  * Per-conversation continuous-work statusbar item. Reads and writes the
  * ACTIVE session's flag (keyed by runtime session id), so one chat's toggle
  * never leaks into another.
+ *
+ * When requestGateway is provided, also calls session.set_continuous_work
+ * RPC to propagate the flag to the running agent mid-turn (not just on
+ * the next submit).
  */
-export function useContinuousWorkStatusbarItem(sessionId: string | null): StatusbarItem {
+export function useContinuousWorkStatusbarItem(
+  sessionId: string | null,
+  requestGateway?: <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>
+): StatusbarItem {
   const { t } = useI18n()
   const copy = t.composer
   const active = useStore($continuousWorkBySession)[sessionId ?? ''] ?? false
@@ -25,8 +32,15 @@ export function useContinuousWorkStatusbarItem(sessionId: string | null): Status
   const setEnabled = useCallback(
     (enabled: boolean) => {
       setContinuousWorkForSession(sessionId, enabled)
+      // Propagate to running agent mid-turn via WebSocket RPC
+      if (requestGateway && sessionId) {
+        requestGateway('session.set_continuous_work', {
+          session_id: sessionId,
+          enabled
+        }).catch(() => { /* ignore — agent may not be running */ })
+      }
     },
-    [sessionId]
+    [sessionId, requestGateway]
   )
 
   const toggle = useMemo(() => () => setEnabled(!active), [active, setEnabled])

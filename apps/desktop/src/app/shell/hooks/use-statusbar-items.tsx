@@ -286,7 +286,7 @@ export function useStatusbarItems({
   const tokensPerSecond = tokensPerSecondLabel(currentUsage)
 
   const approvalModeItem = useApprovalModeStatusbarItem(activeGatewayProfile, requestGateway)
-  const continuousWorkItem = useContinuousWorkStatusbarItem(activeSessionId)
+  const continuousWorkItem = useContinuousWorkStatusbarItem(activeSessionId, requestGateway)
   const systemResourcesItem = useSystemResourcesStatusbarItem()
 
   const gatewayMenuContent = useMemo(
