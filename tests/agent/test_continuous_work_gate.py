@@ -213,3 +213,189 @@ class TestNudgeContent:
         )
         assert "I PERSONALLY FAILED" in nudge
         assert "I accept that this override is a personal failure" in nudge
+
+
+# ─── CW v2: Critic Gate Tests ─────────────────────────────────────────────────
+
+from agent.continuous_work_critic import (
+    CircuitBreaker,
+    CriticVerdict,
+    TurnEvidence,
+    gather_turn_evidence,
+    parse_critic_response,
+)
+
+
+class TestCircuitBreaker:
+    def test_trips_after_max_strikes(self):
+        cb = CircuitBreaker(max_strikes=3)
+        assert cb.record_rejection("r1") is None
+        assert cb.record_rejection("r2") is None
+        msg = cb.record_rejection("r3")
+        assert msg is not None
+        assert "Circuit breaker tripped" in msg
+        assert cb.tripped is True
+
+    def test_does_not_fire_after_trip(self):
+        cb = CircuitBreaker(max_strikes=3)
+        cb.record_rejection("r1")
+        cb.record_rejection("r2")
+        cb.record_rejection("r3")  # trips
+        assert cb.record_rejection("r4") is None
+        assert cb.record_rejection("r5") is None
+
+    def test_resets_on_approval(self):
+        cb = CircuitBreaker(max_strikes=3)
+        cb.record_rejection("r1")
+        cb.record_rejection("r2")
+        cb.record_approval()
+        assert cb.strike_count == 0
+        assert cb.tripped is False
+        # Can trip again after reset
+        cb.record_rejection("r1")
+        cb.record_rejection("r2")
+        msg = cb.record_rejection("r3")
+        assert msg is not None
+
+    def test_strikes_remaining(self):
+        cb = CircuitBreaker(max_strikes=3)
+        assert cb.strikes_remaining == 3
+        cb.record_rejection("r1")
+        assert cb.strikes_remaining == 2
+        cb.record_rejection("r2")
+        assert cb.strikes_remaining == 1
+        cb.record_rejection("r3")
+        assert cb.strikes_remaining == 0
+
+
+class TestParseCriticResponse:
+    def test_explicit_approved(self):
+        r = parse_critic_response("[STATUS]\nAPPROVED\n\n[VIOLATIONS]\nNone")
+        assert r.passed is True
+        assert r.status == "APPROVED"
+
+    def test_explicit_rejected(self):
+        r = parse_critic_response("[STATUS]\nREJECTED\n\n[VIOLATIONS]\n1, 3")
+        assert r.passed is False
+        assert r.status == "REJECTED"
+        assert "1" in r.violations
+        assert "3" in r.violations
+
+    def test_no_status_positive_critique_approved(self):
+        """When LLM omits [STATUS], positive critique with no violations = APPROVED."""
+        r = parse_critic_response(
+            "The work is exceptional and meets all criteria.\n\n"
+            "[VIOLATIONS]\nNone\n\n"
+            "[CRITIQUE]\nThe work is solid and well-structured.\n\n"
+            "[REQUIRED_ACTION]\nNone"
+        )
+        assert r.passed is True
+        assert r.status == "APPROVED"
+
+    def test_no_status_negative_critique_rejected(self):
+        """When LLM omits [STATUS], negative critique with violations = REJECTED."""
+        r = parse_critic_response(
+            "The agent did not complete the work.\n\n"
+            "[VIOLATIONS]\n1, 3, 5\n\n"
+            "[CRITIQUE]\nMultiple criteria failed.\n\n"
+            "[REQUIRED_ACTION]\nFix the issues."
+        )
+        assert r.passed is False
+        assert r.status == "REJECTED"
+
+    def test_no_status_with_none_dash_text_approved(self):
+        """'None — the work meets the bar...' should be treated as no action."""
+        r = parse_critic_response(
+            "The work is exceptional.\n\n"
+            "[VIOLATIONS]\nNone\n\n"
+            "[CRITIQUE]\nThe work meets the bar and should be considered complete.\n\n"
+            "[REQUIRED_ACTION]\nNone — the work meets the bar and should be considered complete."
+        )
+        assert r.passed is True
+
+    def test_empty_response_rejected(self):
+        r = parse_critic_response("")
+        assert r.passed is False
+
+    def test_positive_signals_detected(self):
+        """All positive signals should trigger approval when no [STATUS]."""
+        for signal in ["substantial", "verified", "solid", "exceptional",
+                       "meets the bar", "polished", "thorough", "strong"]:
+            r = parse_critic_response(
+                f"The work review.\n\n[VIOLATIONS]\nNone\n\n"
+                f"[CRITIQUE]\nThe work is {signal} and well-structured.\n\n"
+                "[REQUIRED_ACTION]\nNone"
+            )
+            assert r.passed is True, f"Signal '{signal}' not detected as positive"
+
+
+class TestGatherTurnEvidence:
+    def test_only_walks_current_turn(self):
+        """Historical commands from previous turns should be excluded."""
+        messages = [
+            # Turn 1: exploration
+            {"role": "user", "content": "explore"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "ls -la"}'}},
+            ]},
+            {"role": "tool", "content": "file listing"},
+            {"role": "assistant", "content": "done"},
+            # Turn 2: verification
+            {"role": "user", "content": "verify"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "pytest"}'}},
+            ]},
+            {"role": "tool", "content": "48 passed"},
+            {"role": "assistant", "content": "verified"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert "ls -la" not in evidence.terminal_commands
+        assert "pytest" in evidence.terminal_commands
+        assert evidence.total_tool_calls == 1
+
+    def test_skips_synthetic_cw_nudges(self):
+        """Synthetic CW nudge messages should not be treated as user messages."""
+        messages = [
+            {"role": "user", "content": "do work"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "pytest"}'}},
+            ]},
+            {"role": "tool", "content": "48 passed"},
+            {"role": "assistant", "content": "done"},
+            # Synthetic CW nudge
+            {"role": "user", "content": "[CW CRITIC: rejected]", "_continuous_work_synthetic": True},
+            # Agent's response to nudge
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "pytest -v"}'}},
+            ]},
+            {"role": "tool", "content": "48 passed"},
+            {"role": "assistant", "content": "verified"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        # Should include the latest pytest, not the old one
+        assert "pytest -v" in evidence.terminal_commands
+
+    def test_empty_messages(self):
+        evidence = gather_turn_evidence([])
+        assert evidence.total_tool_calls == 0
+        assert evidence.terminal_commands == []
+
+    def test_work_vs_readonly_classification(self):
+        messages = [
+            {"role": "user", "content": "work"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "write_file", "arguments": '{"path": "f.py", "content": "x"}'}},
+                {"function": {"name": "read_file", "arguments": '{"path": "f.py"}'}},
+                {"function": {"name": "terminal", "arguments": '{"command": "pytest"}'}},
+                {"function": {"name": "search_files", "arguments": '{"pattern": "x"}'}},
+            ]},
+            {"role": "tool", "content": "written"},
+            {"role": "tool", "content": "content"},
+            {"role": "tool", "content": "48 passed"},
+            {"role": "tool", "content": "found"},
+            {"role": "assistant", "content": "done"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert evidence.work_tool_calls == 2  # write_file + terminal
+        assert evidence.read_only_tool_calls == 2  # read_file + search_files
+        assert "f.py" in evidence.files_written
