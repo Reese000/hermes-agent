@@ -465,7 +465,12 @@ def invoke_critic(
         elif isinstance(response, dict):
             choices = response.get("choices", [])
             if choices:
-                raw = choices[0].get("message", {}).get("content", "")
+                msg = choices[0].get("message", {})
+                raw = msg.get("content", "")
+                # For reasoning models (DeepSeek, etc.), the critique may be
+                # in the reasoning field instead of content
+                if not raw.strip() and msg.get("reasoning"):
+                    raw = msg["reasoning"]
             else:
                 raw = str(response)
         else:
