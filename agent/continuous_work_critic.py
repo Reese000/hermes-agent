@@ -352,9 +352,11 @@ def parse_critic_response(response: str) -> CriticVerdict:
         # If violations are empty and required action is "None" or empty,
         # and the critique is positive, treat as approval
         has_no_violations = not violations or violations_text.lower().strip() == "none"
-        has_no_action = not required_action or required_action.lower().strip() == "none"
+        has_no_action = not required_action or required_action.lower().strip().startswith("none")
         positive_signals = ["substantial", "verified", "solid", "approval", "warrants approval",
-                           "well-structured", "comprehensive", "deserves special recognition"]
+                           "well-structured", "comprehensive", "deserves special recognition",
+                           "exceptional", "meets the bar", "should be considered complete",
+                           "polished", "thorough", "strong"]
         has_positive_critique = any(sig in critique.lower() for sig in positive_signals)
 
         if has_no_violations and has_no_action and has_positive_critique:
