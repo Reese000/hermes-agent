@@ -3599,6 +3599,9 @@ export const en: Translations = {
     yoloSystem: active => `YOLO ${active ? 'on' : 'off'} for this session`,
     yoloTitle: 'YOLO',
     yoloToggleFailed: 'Could not toggle YOLO',
+    cwOn: 'Continuous Work mode ON — adversarial critic will review all work before allowing stop',
+    cwOff: 'Continuous Work mode OFF',
+    cwSystem: active => `Continuous Work mode ${active ? 'enabled. The adversarial critic will review all work before allowing the agent to stop.' : 'disabled.'}`,
     profileStatus: current =>
       `Profile: ${current}. Use /profile <name> or the "New session" picker to start a chat in another profile.`,
     unknownProfile: 'Unknown profile',

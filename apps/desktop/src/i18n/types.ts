@@ -3115,6 +3115,9 @@ export interface Translations {
     yoloSystem: (active: boolean) => string
     yoloTitle: string
     yoloToggleFailed: string
+    cwOn: string
+    cwOff: string
+    cwSystem: (active: boolean) => string
     profileStatus: (current: string) => string
     unknownProfile: string
     noProfileNamed: (target: string, available: string) => string

@@ -1861,7 +1861,10 @@ def init_agent(
     _agent_section_cw = _agent_cfg.get("agent", {})
     if not isinstance(_agent_section_cw, dict):
         _agent_section_cw = {}
-    agent._continuous_work = bool(_agent_section_cw.get("continuous_work", False))
+    agent._continuous_work = bool(
+        _agent_section_cw.get("continuous_work", False)
+        or _agent_section_cw.get("continuous_work_default", False)
+    )
     # API-transport streaming (``model.streaming``, default true).  The
     # conversation loop prefers ``stream=True`` for every turn — including
     # subagent turns — to get fine-grained liveness health-checking (#3120),

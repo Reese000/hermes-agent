@@ -9008,31 +9008,85 @@ def run_conversation(
                     final_response = None
                     continue
 
+                # Agent self-toggle: the agent can write [CW ON] in its
+                # response to ENABLE Continuous Work mode. However, the agent
+                # CANNOT directly disable CW — it must write [REQUEST CW OFF]
+                # which routes through the adversarial critic gate. The critic
+                # will only approve the disable if all work is genuinely complete.
+                if final_response and isinstance(final_response, str):
+                    _cw_lower = final_response.lower()
+                    if "[cw on]" in _cw_lower:
+                        agent._continuous_work = True
+                        final_response = final_response.replace("[CW ON]", "").replace("[cw on]", "").strip()
+                        logger.info("Agent self-toggled CW ON")
+                    # [CW OFF] is NOT handled here — it goes through the critic
+
                 # Continuous-work enforcement gate: when continuous work is ON
-                # for this conversation, the agent cannot stop with a bare
-                # completion claim unless it performed real work (a work-evidence
-                # tool call) this turn OR explicitly declared an override. This
-                # is a hard runtime gate, not a prompt nudge — it re-injects a
-                # synthetic follow-up and runs the agent again, bounded by
-                # _continuous_work_nudges so a stubby loop can't run forever.
+                # for this conversation, the agent cannot stop without passing
+                # an adversarial critic review. The critic is a dedicated LLM
+                # call that evaluates the agent's work against 7 quality criteria.
+                # If the critic rejects, the agent is forced to continue with
+                # the critic's feedback. The circuit breaker (3 strikes) prevents
+                # infinite reject loops.
                 _cw_nudge = None
                 if getattr(agent, "_continuous_work", False):
                     try:
+                        from agent.continuous_work_critic import (
+                            CircuitBreaker,
+                            critic_gate,
+                        )
                         from agent.continuous_work_gate import (
                             build_continuous_work_nudge,
                             mark_continuous_work_nudge_issued,
                         )
 
-                        _cw_nudge = build_continuous_work_nudge(
+                        # Initialize circuit breaker per-session
+                        if not hasattr(agent, "_cw_circuit_breaker"):
+                            agent._cw_circuit_breaker = CircuitBreaker()
+
+                        # Extract user request from the turn's user message
+                        _cw_user_request = ""
+                        for _m in reversed(messages):
+                            if isinstance(_m, dict) and _m.get("role") == "user":
+                                _content = _m.get("content", "")
+                                if isinstance(_content, str) and not _content.startswith("[System:"):
+                                    _cw_user_request = _content[:2000]
+                                    break
+                                elif isinstance(_content, list):
+                                    for _part in _content:
+                                        if isinstance(_part, dict) and _part.get("type") == "text":
+                                            _cw_user_request = _part.get("text", "")[:2000]
+                                            break
+
+                        # Invoke the adversarial critic gate
+                        _cw_nudge = critic_gate(
+                            agent=agent,
                             final_response=final_response,
-                            work_evidence_tools=getattr(
-                                agent, "_continuous_work_evidence_tools", 0
-                            ),
-                            attempts=getattr(agent, "_continuous_work_nudges", 0),
+                            messages=messages,
+                            user_request=_cw_user_request,
+                            circuit_breaker=agent._cw_circuit_breaker,
                         )
+
+                        if _cw_nudge is None:
+                            # Critic approved — allow stop
+                            logger.info("CW critic gate: APPROVED, allowing stop")
+                        else:
+                            logger.info("CW critic gate: REJECTED, forcing continuation")
+
                     except Exception:
-                        logger.debug("continuous-work gate check failed", exc_info=True)
-                        _cw_nudge = None
+                        logger.debug("continuous-work critic gate failed, falling back to pattern gate", exc_info=True)
+                        # Fall back to the old pattern-matching gate
+                        try:
+                            _cw_nudge = build_continuous_work_nudge(
+                                final_response=final_response,
+                                work_evidence_tools=getattr(
+                                    agent, "_continuous_work_evidence_tools", 0
+                                ),
+                                attempts=getattr(agent, "_continuous_work_nudges", 0),
+                            )
+                        except Exception:
+                            logger.debug("continuous-work fallback gate also failed", exc_info=True)
+                            _cw_nudge = None
 
                 if _cw_nudge:
                     mark_continuous_work_nudge_issued(agent)

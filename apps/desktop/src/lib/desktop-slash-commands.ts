@@ -57,6 +57,7 @@ export type DesktopActionId =
   | 'browser'
   | 'btw'
   | 'compress'
+  | 'cw'
   | 'handoff'
   | 'hatch'
   | 'help'
@@ -186,6 +187,12 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     surface: action('branch')
   },
   { name: '/yolo', description: 'Toggle YOLO — auto-approve dangerous commands', surface: action('yolo') },
+  {
+    name: '/cw',
+    description: 'Toggle Continuous Work mode — adversarial quality enforcement',
+    aliases: ['/continuous-work', '/continuouswork'],
+    surface: action('cw')
+  },
   {
     name: '/wake',
     description: 'Control the desktop wake-word listener [on|off|status]',

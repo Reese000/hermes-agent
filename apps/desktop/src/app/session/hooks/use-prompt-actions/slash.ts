@@ -16,6 +16,7 @@ import {
 } from '@/lib/desktop-slash-commands'
 import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { setSessionYolo } from '@/lib/yolo-session'
+import { $continuousWorkBySession, toggleContinuousWorkForSession } from '@/store/continuous-work'
 import { openCommandPalettePage } from '@/store/command-palette'
 import { setComposerDraft } from '@/store/composer'
 import { enqueueQueuedPrompt } from '@/store/composer-queue'
@@ -789,6 +790,25 @@ export function useSlashCommand(deps: SlashCommandDeps) {
             appendSessionTextMessage(sid, 'system', copy.yoloSystem(active))
           } catch {
             notify({ kind: 'error', title: copy.yoloTitle, message: copy.yoloToggleFailed })
+          }
+        },
+        // /cw toggles Continuous Work mode — adversarial quality enforcement.
+        // Per-session: each chat has its own flag, same as the statusbar toggle.
+        cw: async ({ sessionHint }) => {
+          const sid = sessionHint || activeSessionIdRef.current
+          const next = toggleContinuousWorkForSession(sid)
+
+          notify({
+            kind: 'success',
+            message: next ? copy.cwOn : copy.cwOff
+          })
+
+          if (sid) {
+            appendSessionTextMessage(
+              sid,
+              'system',
+              copy.cwSystem(next)
+            )
           }
         },
         // /wake must stay in the gateway process that owns the Desktop wake

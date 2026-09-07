@@ -3208,6 +3208,9 @@ export const ja = defineLocale({
     yoloSystem: active => `このセッションの YOLO ${active ? 'オン' : 'オフ'}`,
     yoloTitle: 'YOLO',
     yoloToggleFailed: 'YOLO を切り替えられませんでした',
+    cwOn: '連続作業モード ON — 敵対的批評家がすべての作業を確認してから停止を許可します',
+    cwOff: '連続作業モード OFF',
+    cwSystem: active => `連続作業モード${active ? 'が有効になりました。敵対的批評家がすべての作業を確認してからエージェントの停止を許可します。' : 'が無効になりました。'}`,
     profileStatus: current =>
       `プロファイル: ${current}。/profile <name> または「新しいセッション」ピッカーを使って別のプロファイルでチャットを始めてください。`,
     unknownProfile: '不明なプロファイル',

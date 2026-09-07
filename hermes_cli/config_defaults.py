@@ -213,6 +213,12 @@ DEFAULT_CONFIG = {
         # composer and persisted to config.yaml so every new agent build picks
         # it up. Default False (feature off).
         "continuous_work": False,
+        # Pre-enable Continuous Work for all new sessions. When True, every
+        # new session starts with CW active — the adversarial critic will
+        # review all work before allowing the agent to stop. The agent can
+        # still toggle CW off mid-session via [CW OFF] marker, and the user
+        # can toggle via /cw command or statusbar. Default False.
+        "continuous_work_default": False,
         # Local-environment toolchain probe — surfaces Python/pip/uv/PEP-668
         # state in the system prompt when something non-default is detected
         # (e.g. python3 has no pip module, pip→python version mismatch, PEP
