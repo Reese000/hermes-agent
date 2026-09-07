@@ -9089,30 +9089,51 @@ def run_conversation(
                             _cw_nudge = None
 
                 if _cw_nudge:
-                    mark_continuous_work_nudge_issued(agent)
-                    final_msg["finish_reason"] = "continuous_work_required"
-                    # The attempted final answer is real content — persist and
-                    # surface it as an interim message so the user sees what was
-                    # rejected before the continuation runs. Only the nudge is
-                    # synthetic (stripped from the durable transcript).
-                    agent._emit_interim_assistant_message(final_msg)
-                    append_message(messages, final_msg)
-                    try:
-                        agent._flush_messages_to_session_db(messages, conversation_history)
-                    except Exception:
-                        logger.debug("continuous-work interim flush failed", exc_info=True)
-                    append_message(messages, {
-                        "role": "user",
-                        "content": _cw_nudge,
-                        "_continuous_work_synthetic": True,
-                    })
-                    agent._session_messages = messages
-                    logger.debug(
-                        "continuous-work gate nudge issued (attempt %d)",
-                        getattr(agent, "_continuous_work_nudges", 0),
-                    )
-                    final_response = None
-                    continue
+                    # HARD CEILING: prevent infinite CW loops regardless of
+                    # parser behavior. If the agent has been nudged more than
+                    # MAX_CW_NUDGES times in a single turn, force it to stop.
+                    # This is defense-in-depth — the parser fix should prevent
+                    # false rejections, but this guard ensures no agent can get
+                    # stuck in an infinite loop even with old code.
+                    MAX_CW_NUDGES = 5
+                    _nudge_count = getattr(agent, "_continuous_work_nudges", 0)
+                    if _nudge_count >= MAX_CW_NUDGES:
+                        logger.warning(
+                            "CW hard ceiling hit (%d nudges) — forcing stop. "
+                            "This likely indicates a parser bug (critic approved "
+                            "but parser defaulted to REJECTED).",
+                            _nudge_count,
+                        )
+                        _cw_nudge = None
+                        # Override the agent's _continuous_work flag to prevent
+                        # further CW enforcement on this turn
+                        agent._continuous_work = False
+
+                    if _cw_nudge:
+                        mark_continuous_work_nudge_issued(agent)
+                        final_msg["finish_reason"] = "continuous_work_required"
+                        # The attempted final answer is real content — persist and
+                        # surface it as an interim message so the user sees what was
+                        # rejected before the continuation runs. Only the nudge is
+                        # synthetic (stripped from the durable transcript).
+                        agent._emit_interim_assistant_message(final_msg)
+                        append_message(messages, final_msg)
+                        try:
+                            agent._flush_messages_to_session_db(messages, conversation_history)
+                        except Exception:
+                            logger.debug("continuous-work interim flush failed", exc_info=True)
+                        append_message(messages, {
+                            "role": "user",
+                            "content": _cw_nudge,
+                            "_continuous_work_synthetic": True,
+                        })
+                        agent._session_messages = messages
+                        logger.debug(
+                            "continuous-work gate nudge issued (attempt %d)",
+                            getattr(agent, "_continuous_work_nudges", 0),
+                        )
+                        final_response = None
+                        continue
 
                 # User verification-loop gate: when the agent edited code this
                 # turn, let a registered `pre_verify` hook (plugin/shell) keep it
