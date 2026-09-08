@@ -214,7 +214,7 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
     # final response), but the tool calls that produced the work are in
     # adjacent turns.  Without this, the critic sees work_tool_calls = 0
     # and auto-rejects even when substantial work was performed.
-    turn_messages = messages[max(0, last_user_idx - 5):] if last_user_idx >= 0 else messages[-40:]
+    turn_messages = messages[-40:]
 
     for msg in turn_messages:
         if not isinstance(msg, dict):
