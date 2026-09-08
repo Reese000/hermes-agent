@@ -545,13 +545,10 @@ class CircuitBreaker:
                 f"consecutive rejections. The agent has been unable to satisfy the "
                 f"critic after {self.max_strikes} attempts.\n\n"
                 f"Last rejection reason: {reason}\n\n"
-                f"The agent MUST now either:\n"
-                f"1. Complete ALL remaining work to the critic's satisfaction, OR\n"
-                f"2. Write a full personal-failure admission with ALL required markers "
-                f"(I AM OVERRIDING, I PERSONALLY FAILED, numbered failure list, "
-                f"I accept that this override is a personal failure).\n\n"
-                f"This is the FINAL attempt. The next response will be delivered to "
-                f"the user regardless of quality.]"
+                f"The agent MUST continue working until the critic approves. "
+                f"There is no escape hatch, no override admission, no way to "
+                f"disable CW. Fix the issues the critic identified and try again.\n\n"
+                f"The next response will be delivered to the user.]"
             )
         return None
 

@@ -9010,7 +9010,7 @@ def run_conversation(
 
                 # Agent self-toggle: the agent can write [CW ON] in its
                 # response to ENABLE Continuous Work mode. However, the agent
-                # CANNOT directly disable CW — it must write [REQUEST CW OFF]
+                # CANNOT disable CW — the only exit is the critic approving
                 # which routes through the adversarial critic gate. The critic
                 # will only approve the disable if all work is genuinely complete.
                 if final_response and isinstance(final_response, str):
@@ -9019,7 +9019,7 @@ def run_conversation(
                         agent._continuous_work = True
                         final_response = final_response.replace("[CW ON]", "").replace("[cw on]", "").strip()
                         logger.info("Agent self-toggled CW ON")
-                    # [CW OFF] is NOT handled here — it goes through the critic
+                    # Agent cannot disable CW at all — removed escape hatches
 
                 # Continuous-work enforcement gate: when continuous work is ON
                 # for this conversation, the agent cannot stop without passing
