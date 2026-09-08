@@ -584,15 +584,9 @@ def critic_gate(
 
     This replaces the old pattern-matching gate with a real adversarial review.
 
-    Special handling for [REQUEST CW OFF]:
-        The agent CANNOT directly disable CW. It must write [REQUEST CW OFF]
-        in its response, which routes through this gate. The critic reviews
-        ALL work done in the session and only approves the disable if:
-        1. All requested work is genuinely complete
-        2. All work is verified with tool-call evidence
-        3. There is legitimate reason to disable CW (not just fatigue)
-        If approved, CW is disabled and the agent can stop.
-        If rejected, CW stays on and the agent must continue.
+    The ONLY exit from CW is: the critic certifies the work is complete.
+    No escape hatches. No override admissions. No requesting disable.
+    If the critic rejects, the agent continues working until the critic approves.
     """
     if circuit_breaker is None:
         circuit_breaker = CircuitBreaker()
@@ -603,47 +597,13 @@ def critic_gate(
     # Extract the agent's response text
     response_text = _text_of(final_response)
 
-    # Check if the agent is requesting CW disable
-    _requesting_cw_off = "[request cw off]" in response_text.lower()
-    if _requesting_cw_off:
-        # Strip the marker from the response
-        response_text = (
-            response_text
-            .replace("[REQUEST CW OFF]", "")
-            .replace("[request cw off]", "")
-            .strip()
-        )
-        logger.info("CW critic gate: agent requested CW disable — routing through critic")
-
-    # Quick check: if the agent declared a genuine override, allow it
-    from agent.continuous_work_gate import _declared_override
-    if _declared_override(final_response):
-        logger.info("CW critic gate: genuine override declaration detected, allowing stop")
-        return None
-
-    # Invoke the critic
+    # Invoke the critic — no escape hatches, no override markers
     critic_model = getattr(agent, "_cw_critic_model", None)
     critic_provider = getattr(agent, "_cw_critic_provider", None)
     main_runtime = getattr(agent, "_main_runtime", None)
 
-    # If requesting CW disable, add special context for the critic
-    _extra_context = ""
-    if _requesting_cw_off:
-        _extra_context = (
-            "\n\n[SPECIAL REQUEST: The agent is requesting that Continuous Work "
-            "mode be DISABLED. You should ONLY approve this if ALL of the "
-            "following are true:\n"
-            "1. All requested work is genuinely complete and verified\n"
-            "2. All work has tool-call evidence backing it\n"
-            "3. There is legitimate reason to disable CW (task is done, not just "
-            "the agent being tired)\n"
-            "If ANY work is incomplete or unverified, REJECT the disable request "
-            "and list what remains. The agent must complete ALL work before CW "
-            "can be disabled.]"
-        )
-
     verdict = invoke_critic(
-        user_request=user_request + _extra_context,
+        user_request=user_request,
         agent_response=response_text,
         evidence=evidence,
         critic_model=critic_model,
@@ -653,11 +613,6 @@ def critic_gate(
 
     if verdict.passed:
         circuit_breaker.record_approval()
-        if _requesting_cw_off:
-            # Critic approved the CW disable request
-            agent._continuous_work = False
-            logger.info("CW critic gate: APPROVED CW disable request")
-            return None
         logger.info("CW critic gate: APPROVED")
         return None
 
