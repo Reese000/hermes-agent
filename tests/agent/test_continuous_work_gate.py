@@ -331,7 +331,7 @@ class TestParseCriticResponse:
 
 class TestGatherTurnEvidence:
     def test_only_walks_current_turn(self):
-        """Historical commands from previous turns should be excluded."""
+        """Wider evidence window captures tool calls from recent turns."""
         messages = [
             # Turn 1: exploration
             {"role": "user", "content": "explore"},
@@ -349,9 +349,11 @@ class TestGatherTurnEvidence:
             {"role": "assistant", "content": "verified"},
         ]
         evidence = gather_turn_evidence(messages)
-        assert "ls -la" not in evidence.terminal_commands
+        # Wider window: both commands from adjacent turns are captured
+        assert "ls -la" in evidence.terminal_commands
         assert "pytest" in evidence.terminal_commands
-        assert evidence.total_tool_calls == 1
+        assert evidence.total_tool_calls == 2
+        assert evidence.verification_output is True
 
     def test_skips_synthetic_cw_nudges(self):
         """Synthetic CW nudge messages should not be treated as user messages."""

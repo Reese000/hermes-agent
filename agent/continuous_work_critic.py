@@ -96,9 +96,7 @@ if approved]
 ## Rules
 - APPROVE only when ALL 7 criteria are met satisfactorily
 - REJECT with specific, actionable feedback — not vague complaints
-- If the agent did NO real work (only read files, searched, etc.), REJECT with \
-violation of criteria #1
-- If the agent claims completion but hasn't verified, REJECT with violation of \
+- If the agent did NO real work (only read files, searched, etc.) AND there is no verification output (test results, build output), REJECT with \nviolation of criteria #1. Verification output (pytest results, git output, build logs) IS evidence of work — the agent ran commands that produced these results\n- If the agent claims completion but hasn't verified, REJECT with violation of \
 criteria #3
 - If the agent did the bare minimum, REJECT with violation of criteria #6 and #7
 - Be specific about WHAT is missing and WHAT to do about it
@@ -148,11 +146,12 @@ class TurnEvidence:
     test_results: list[str] = field(default_factory=list)
     tool_names_used: list[str] = field(default_factory=list)
     total_tool_calls: int = 0
+    verification_output: bool = False
 
     @property
     def has_real_work(self) -> bool:
         """True if the agent performed any mutating/producing work."""
-        return self.work_tool_calls > 0
+        return self.work_tool_calls > 0 or self.verification_output
 
     @property
     def work_ratio(self) -> float:
@@ -176,6 +175,8 @@ class TurnEvidence:
             lines.append(f"Terminal commands ({len(self.terminal_commands)}):")
             for cmd in self.terminal_commands[:20]:  # Cap at 20
                 lines.append(f"  $ {cmd}")
+        if self.verification_output:
+            lines.append("Verification output detected (test/build results present)")
         if self.test_results:
             lines.append(f"Test results:")
             for result in self.test_results[:10]:  # Cap at 10
@@ -208,8 +209,12 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
                 last_user_idx = i
                 break
 
-    # Only walk messages after the last user message (current turn)
-    turn_messages = messages[last_user_idx + 1:] if last_user_idx >= 0 else messages[-20:]
+    # Walk the last 40 messages to capture tool calls from recent turns.
+    # The current turn's assistant message often has NO tool calls (text-only
+    # final response), but the tool calls that produced the work are in
+    # adjacent turns.  Without this, the critic sees work_tool_calls = 0
+    # and auto-rejects even when substantial work was performed.
+    turn_messages = messages[max(0, last_user_idx - 5):] if last_user_idx >= 0 else messages[-40:]
 
     for msg in turn_messages:
         if not isinstance(msg, dict):
@@ -272,6 +277,12 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
             )
             if is_test_result:
                 evidence.test_results.append(content[:500])
+
+    # Verification output: if the current turn's tool results contain
+    # test pass/fail markers, that IS evidence of verification work,
+    # even if the tool calls that produced them are in earlier turns.
+    if evidence.test_results:
+        evidence.verification_output = True
 
     return evidence
 
