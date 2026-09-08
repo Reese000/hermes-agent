@@ -463,6 +463,41 @@ class TestTextOf:
         assert _text_of(42) == "42"
 
 
+class TestCWMidTurnEnforcement:
+    """Tests for CW enforcement when agent produces tool calls + completion text."""
+
+    def test_completion_signals_detected_in_text(self):
+        """Completion signals should be detected in assistant text."""
+        from agent.continuous_work_gate import _COMPLETION_SIGNALS
+
+        # Text with completion signal
+        text = "All done! Here are the results from my work."
+        text_lower = text.lower()
+        has_signal = any(sig in text_lower for sig in _COMPLETION_SIGNALS)
+        assert has_signal is True
+
+    def test_no_signal_in_normal_text(self):
+        """Normal commentary should not trigger completion signals."""
+        from agent.continuous_work_gate import _COMPLETION_SIGNALS
+
+        text = "Running the test suite now."
+        text_lower = text.lower()
+        has_signal = any(sig in text_lower for sig in _COMPLETION_SIGNALS)
+        assert has_signal is False
+
+    def test_all_completion_signals_listed(self):
+        """Verify the completion signals list is comprehensive."""
+        from agent.continuous_work_gate import _COMPLETION_SIGNALS
+
+        expected = [
+            "i certify:", "certified:", "all done", "task complete",
+            "job complete", "work is complete", "work is done",
+            "everything is complete", "everything is done", "fully verified",
+        ]
+        for sig in expected:
+            assert sig in _COMPLETION_SIGNALS, f"Missing signal: {sig}"
+
+
 class TestTerminalOutputs:
     """Tests for terminal_outputs population and test result detection."""
 
