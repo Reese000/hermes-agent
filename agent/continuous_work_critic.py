@@ -460,15 +460,26 @@ def invoke_critic(
         )
 
         # Extract text from response
+        # call_llm returns either a string, a dict, or a ChatCompletion object
+        # (from openai SDK). ChatCompletion has .choices[0].message.content
+        # as attributes, not dict keys. Handle all three cases.
+        raw = ""
         if isinstance(response, str):
             raw = response
+        elif hasattr(response, "choices") and response.choices:
+            # ChatCompletion object (openai SDK)
+            msg = response.choices[0].message
+            raw = getattr(msg, "content", "") or ""
+            # For reasoning models (DeepSeek, etc.), the critique may be
+            # in the reasoning field instead of content
+            if not raw.strip() and hasattr(msg, "reasoning") and msg.reasoning:
+                raw = msg.reasoning
         elif isinstance(response, dict):
+            # Dict fallback
             choices = response.get("choices", [])
             if choices:
                 msg = choices[0].get("message", {})
                 raw = msg.get("content", "")
-                # For reasoning models (DeepSeek, etc.), the critique may be
-                # in the reasoning field instead of content
                 if not raw.strip() and msg.get("reasoning"):
                     raw = msg["reasoning"]
             else:
