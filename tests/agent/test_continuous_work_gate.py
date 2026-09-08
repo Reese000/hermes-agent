@@ -565,3 +565,106 @@ class TestTerminalOutputs:
         ]
         evidence = gather_turn_evidence(messages)
         assert len(evidence.terminal_outputs) == 0
+
+
+class TestInvokeCritic:
+    """Tests for invoke_critic response extraction logic."""
+
+    def test_extracts_from_chatcompletion_object(self):
+        """ChatCompletion objects should be extracted via attribute access."""
+        from unittest.mock import patch, MagicMock
+        from agent.continuous_work_critic import invoke_critic, TurnEvidence
+
+        # Create a mock ChatCompletion object
+        mock_msg = MagicMock()
+        mock_msg.content = "[STATUS]\nAPPROVED\n\n[VIOLATIONS]\nNone\n\n[CRITIQUE]\nSolid.\n\n[REQUIRED_ACTION]\nNone"
+        mock_msg.reasoning = None
+
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        with patch("agent.auxiliary_client.call_llm", return_value=mock_response):
+            verdict = invoke_critic(
+                user_request="test",
+                agent_response="did work",
+                evidence=TurnEvidence(work_tool_calls=1),
+            )
+        assert verdict.passed is True
+        assert verdict.status == "APPROVED"
+
+    def test_extracts_from_reasoning_when_content_empty(self):
+        """When content is empty, should fall back to reasoning field."""
+        from unittest.mock import patch, MagicMock
+        from agent.continuous_work_critic import invoke_critic, TurnEvidence
+
+        mock_msg = MagicMock()
+        mock_msg.content = ""
+        mock_msg.reasoning = "[STATUS]\nAPPROVED\n\n[VIOLATIONS]\nNone\n\n[CRITIQUE]\nExceptional.\n\n[REQUIRED_ACTION]\nNone"
+
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        with patch("agent.auxiliary_client.call_llm", return_value=mock_response):
+            verdict = invoke_critic(
+                user_request="test",
+                agent_response="did work",
+                evidence=TurnEvidence(work_tool_calls=1),
+            )
+        assert verdict.passed is True
+
+    def test_handles_call_llm_exception(self):
+        """When call_llm raises, should return REJECTED verdict."""
+        from unittest.mock import patch
+        from agent.continuous_work_critic import invoke_critic, TurnEvidence
+
+        with patch("agent.auxiliary_client.call_llm", side_effect=Exception("API error")):
+            verdict = invoke_critic(
+                user_request="test",
+                agent_response="did work",
+                evidence=TurnEvidence(work_tool_calls=1),
+            )
+        assert verdict.passed is False
+        assert verdict.status == "REJECTED"
+        assert "API error" in verdict.critique
+
+    def test_extracts_from_dict_response(self):
+        """Dict responses should be handled via dict access."""
+        from unittest.mock import patch
+        from agent.continuous_work_critic import invoke_critic, TurnEvidence
+
+        dict_response = {
+            "choices": [{
+                "message": {
+                    "content": "[STATUS]\nAPPROVED\n\n[VIOLATIONS]\nNone\n\n[CRITIQUE]\nGood.\n\n[REQUIRED_ACTION]\nNone"
+                }
+            }]
+        }
+
+        with patch("agent.auxiliary_client.call_llm", return_value=dict_response):
+            verdict = invoke_critic(
+                user_request="test",
+                agent_response="did work",
+                evidence=TurnEvidence(work_tool_calls=1),
+            )
+        assert verdict.passed is True
+
+    def test_extracts_from_string_response(self):
+        """String responses should be parsed directly."""
+        from unittest.mock import patch
+        from agent.continuous_work_critic import invoke_critic, TurnEvidence
+
+        string_response = "[STATUS]\nAPPROVED\n\n[VIOLATIONS]\nNone\n\n[CRITIQUE]\nGood.\n\n[REQUIRED_ACTION]\nNone"
+
+        with patch("agent.auxiliary_client.call_llm", return_value=string_response):
+            verdict = invoke_critic(
+                user_request="test",
+                agent_response="did work",
+                evidence=TurnEvidence(work_tool_calls=1),
+            )
+        assert verdict.passed is True
