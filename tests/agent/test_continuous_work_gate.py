@@ -461,3 +461,107 @@ class TestTextOf:
     def test_integer_returns_str(self):
         from agent.continuous_work_critic import _text_of
         assert _text_of(42) == "42"
+
+
+class TestTerminalOutputs:
+    """Tests for terminal_outputs population and test result detection."""
+
+    def test_terminal_outputs_populated(self):
+        """Tool results should populate terminal_outputs."""
+        from agent.continuous_work_critic import gather_turn_evidence
+        messages = [
+            {"role": "user", "content": "run tests"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "pytest"}'}},
+            ]},
+            {"role": "tool", "content": "48 passed in 1.26s\n=============================="},
+            {"role": "assistant", "content": "done"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert len(evidence.terminal_outputs) == 1
+        assert "48 passed" in evidence.terminal_outputs[0]
+
+    def test_test_results_with_number_passed(self):
+        """'48 passed' should be detected as test result."""
+        from agent.continuous_work_critic import gather_turn_evidence
+        messages = [
+            {"role": "user", "content": "run"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "pytest"}'}},
+            ]},
+            {"role": "tool", "content": "48 passed in 1.26s"},
+            {"role": "assistant", "content": "done"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert len(evidence.test_results) == 1
+        assert "48 passed" in evidence.test_results[0]
+
+    def test_test_results_with_number_failed(self):
+        """'3 failed' should be detected as test result."""
+        from agent.continuous_work_critic import gather_turn_evidence
+        messages = [
+            {"role": "user", "content": "run"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "pytest"}'}},
+            ]},
+            {"role": "tool", "content": "3 failed, 45 passed"},
+            {"role": "assistant", "content": "done"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert len(evidence.test_results) == 1
+
+    def test_bare_word_test_not_detected(self):
+        """A tool result with just 'test' should NOT be detected as test result."""
+        from agent.continuous_work_critic import gather_turn_evidence
+        messages = [
+            {"role": "user", "content": "run"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "echo test"}'}},
+            ]},
+            {"role": "tool", "content": "test"},
+            {"role": "assistant", "content": "done"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert len(evidence.test_results) == 0
+
+    def test_bare_word_error_not_detected(self):
+        """A tool result with just 'error' should NOT be detected as test result."""
+        from agent.continuous_work_critic import gather_turn_evidence
+        messages = [
+            {"role": "user", "content": "run"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "echo error"}'}},
+            ]},
+            {"role": "tool", "content": "error"},
+            {"role": "assistant", "content": "done"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert len(evidence.test_results) == 0
+
+    def test_traceback_detected(self):
+        """A traceback should be detected as test result."""
+        from agent.continuous_work_critic import gather_turn_evidence
+        messages = [
+            {"role": "user", "content": "run"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "pytest"}'}},
+            ]},
+            {"role": "tool", "content": "Traceback (most recent call last):\n  File \"test.py\", line 1"},
+            {"role": "assistant", "content": "done"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert len(evidence.test_results) == 1
+
+    def test_short_content_not_in_terminal_outputs(self):
+        """Content <= 10 chars should not be tracked as terminal output."""
+        from agent.continuous_work_critic import gather_turn_evidence
+        messages = [
+            {"role": "user", "content": "run"},
+            {"role": "assistant", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": '{"command": "echo ok"}'}},
+            ]},
+            {"role": "tool", "content": "ok"},
+            {"role": "assistant", "content": "done"},
+        ]
+        evidence = gather_turn_evidence(messages)
+        assert len(evidence.terminal_outputs) == 0

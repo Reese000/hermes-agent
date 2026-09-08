@@ -250,14 +250,27 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
                     if cmd:
                         evidence.terminal_commands.append(cmd)
 
-        # Check for tool results
+        # Check for tool results — track terminal outputs and test results
         if role == "tool":
             content = str(msg.get("content", ""))
-            # Detect test results
-            if any(marker in content.lower() for marker in [
-                "passed", "failed", "error", "test", "assert", "expect",
-                "exit_code", "exit code"
-            ]):
+            # Track terminal outputs (tool results that follow terminal calls)
+            if content and len(content) > 10:
+                evidence.terminal_outputs.append(content[:500])
+            # Detect test results — tighter markers to avoid false positives
+            # Must contain "passed" or "failed" with a number, or specific
+            # test framework markers
+            content_lower = content.lower()
+            is_test_result = (
+                re.search(r'\d+\s+passed', content_lower) is not None
+                or re.search(r'\d+\s+failed', content_lower) is not None
+                or 'exit code' in content_lower
+                or 'exit_code' in content_lower
+                or 'assertionerror' in content_lower
+                or 'traceback' in content_lower
+                or 'pytest' in content_lower
+                or 'unittest' in content_lower
+            )
+            if is_test_result:
                 evidence.test_results.append(content[:500])
 
     return evidence
