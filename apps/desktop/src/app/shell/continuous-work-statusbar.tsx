@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu'
 import { useI18n } from '@/i18n'
+import { setContinuousWork } from '@/api/config'
 import { Zap, ZapFilled } from '@/lib/icons'
 import { $continuousWorkBySession, setContinuousWorkForSession } from '@/store/continuous-work'
 
@@ -38,6 +39,13 @@ export function useContinuousWorkStatusbarItem(
           session_id: sessionId,
           enabled
         }).catch(() => { /* ignore — agent may not be running */ })
+      }
+      // Persist to config.yaml so headless agents (kanban workers, cron,
+      // new sessions) inherit CW. Only when a live gateway is present
+      // (requestGateway provided) — the tests / minimal harness call
+      // without it, and there's no hermesDesktop API bridge there.
+      if (requestGateway) {
+        void setContinuousWork(enabled).catch(() => { /* non-fatal */ })
       }
     },
     [sessionId, requestGateway]
