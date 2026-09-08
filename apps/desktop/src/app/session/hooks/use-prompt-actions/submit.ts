@@ -768,7 +768,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
           // Continuous work is per-conversation: send the ACTIVE session's flag
           // so the backend injects the guidance for this turn. Mid-session
           // toggling works because the flag rides every submit.
-          ...(continuousWorkForSession(targetId) && { continuous_work: true }),
+          continuous_work: continuousWorkForSession(targetId),
           // A queue drain is a "run after" message, never a live-turn
           // correction. The flag tells the gateway's busy path to hold it for
           // the next turn untouched — without it, losing the settle race
