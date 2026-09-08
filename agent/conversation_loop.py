@@ -8393,6 +8393,22 @@ def run_conversation(
                 # gateway kills the session before the next activity
                 # touch fires (#69559, #69131).
                 agent._touch_activity(f"tool results posted, continuing iteration #{api_call_count}")
+                # CW mid-turn check: when CW is active, check the assistant's
+                # text content (commentary alongside tool calls) for completion
+                # claims. If found, the agent is trying to claim completion
+                # while still executing tool calls — inject a nudge to force
+                # continuation. This prevents the agent from "slipping through"
+                # the CW gate by producing tool calls + completion text.
+                if getattr(agent, "_continuous_work", False):
+                    _tc_text = getattr(assistant_message, "content", "") or ""
+                    if isinstance(_tc_text, str) and _tc_text.strip():
+                        from agent.continuous_work_gate import _COMPLETION_SIGNALS
+                        _tc_lower = _tc_text.lower()
+                        if any(sig in _tc_lower for sig in _COMPLETION_SIGNALS):
+                            logger.info(
+                                "CW mid-turn: completion claim detected alongside tool calls — "
+                                "agent will be reviewed by critic on final response"
+                            )
                 # Continue loop for next response
                 continue
             
