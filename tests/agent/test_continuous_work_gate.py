@@ -703,3 +703,85 @@ class TestInvokeCritic:
                 evidence=TurnEvidence(work_tool_calls=1),
             )
         assert verdict.passed is True
+
+class TestCriticGate:
+    """Tests for the critic_gate function that enforces CW at turn end."""
+
+    def test_approve_returns_none(self):
+        """When critic approves, gate returns None (allow stop)."""
+        from unittest.mock import patch, MagicMock
+        from agent.continuous_work_critic import critic_gate, CircuitBreaker, CriticVerdict
+
+        agent = MagicMock()
+        agent._cw_critic_model = None
+        agent._cw_critic_provider = None
+        agent._main_runtime = None
+
+        with patch("agent.continuous_work_critic.invoke_critic",
+                   return_value=CriticVerdict(passed=True, status="APPROVED")):
+            result = critic_gate(
+                agent=agent,
+                final_response="I did the work.",
+                messages=[{"role": "user", "content": "do work"}],
+                user_request="do work",
+                circuit_breaker=CircuitBreaker(max_strikes=3),
+            )
+        assert result is None
+
+    def test_reject_returns_nudge(self):
+        """When critic rejects, gate returns feedback nudge."""
+        from unittest.mock import patch, MagicMock
+        from agent.continuous_work_critic import critic_gate, CircuitBreaker, CriticVerdict
+
+        agent = MagicMock()
+        agent._cw_critic_model = None
+        agent._cw_critic_provider = None
+        agent._main_runtime = None
+
+        with patch("agent.continuous_work_critic.invoke_critic",
+                   return_value=CriticVerdict(passed=False, status="REJECTED",
+                                               critique="No work done",
+                                               violations=["1"])):
+            result = critic_gate(
+                agent=agent,
+                final_response="all done",
+                messages=[{"role": "user", "content": "do work"}],
+                user_request="do work",
+                circuit_breaker=CircuitBreaker(max_strikes=3),
+            )
+        assert result is not None
+        assert "REJECTED" in result
+        assert "No work done" in result
+
+    def test_circuit_breaker_trips_on_third_rejection(self):
+        """After 3 rejections, circuit breaker trips and returns override message."""
+        from unittest.mock import patch, MagicMock
+        from agent.continuous_work_critic import critic_gate, CircuitBreaker, CriticVerdict
+
+        agent = MagicMock()
+        agent._cw_critic_model = None
+        agent._cw_critic_provider = None
+        agent._main_runtime = None
+
+        cb = CircuitBreaker(max_strikes=3)
+        rejected = CriticVerdict(passed=False, status="REJECTED", critique="bad", violations=["1"])
+
+        with patch("agent.continuous_work_critic.invoke_critic", return_value=rejected):
+            r1 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", circuit_breaker=cb)
+            r2 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", circuit_breaker=cb)
+            assert r1 is not None and "REJECTED" in r1
+            assert r2 is not None and "REJECTED" in r2
+
+            r3 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", circuit_breaker=cb)
+            assert r3 is not None
+            assert "Circuit breaker tripped" in r3
+
+    def test_no_escape_hatch_in_gate(self):
+        """critic_gate has no override or disable logic."""
+        from agent.continuous_work_critic import critic_gate
+        import inspect
+
+        src = inspect.getsource(critic_gate)
+        assert "REQUEST CW OFF" not in src
+        assert "_declared_override" not in src
+        assert "personal failure" not in src
