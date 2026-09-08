@@ -514,14 +514,11 @@ class CircuitBreaker:
     """Prevents infinite reject loops.
 
     After MAX_STRIKES consecutive rejections without any real work between them,
-    the circuit breaker trips and forces the agent to stop (with an override
-    admission). This prevents the critic from trapping the agent in an infinite
-    loop of rejections.
+    the circuit breaker trips and forces the agent to stop. This prevents the
+    critic from trapping the agent in an infinite loop of rejections.
 
-    Bug fix: Added `tripped` flag to prevent the circuit breaker from firing
-    on every subsequent rejection after it trips. Once tripped, subsequent
-    rejections return None (no nudge), allowing the agent's response to be
-    delivered to the user.
+    Once tripped, subsequent rejections return None (no nudge), allowing the
+    agent's response to be delivered to the user.
     """
 
     max_strikes: int = 3
@@ -634,11 +631,27 @@ def critic_gate(
 
 
 def _text_of(final_response: Any) -> str:
-    """Flatten a final response to text."""
+    """Flatten a final response to text.
+
+    Handles: str, list of content parts, dict with 'content' key,
+    and OpenAI ChatCompletionMessage objects (which have .content as
+    an attribute, not a dict key).
+    """
     if final_response is None:
         return ""
     if isinstance(final_response, str):
         return final_response
+    # OpenAI message object — has .content attribute
+    if hasattr(final_response, "content") and not isinstance(final_response, dict):
+        content = getattr(final_response, "content", None)
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                p.get("text", "") if isinstance(p, dict) else str(p)
+                for p in content
+            )
+        return str(final_response)
     if isinstance(final_response, list):
         chunks = []
         for part in final_response:
@@ -649,6 +662,11 @@ def _text_of(final_response: Any) -> str:
             elif isinstance(part, str):
                 chunks.append(part)
         return " ".join(chunks)
+    if isinstance(final_response, dict):
+        content = final_response.get("content", "")
+        if isinstance(content, str):
+            return content
+        return str(final_response)
     try:
         return str(final_response)
     except Exception:

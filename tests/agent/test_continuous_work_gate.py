@@ -399,3 +399,65 @@ class TestGatherTurnEvidence:
         assert evidence.work_tool_calls == 2  # write_file + terminal
         assert evidence.read_only_tool_calls == 2  # read_file + search_files
         assert "f.py" in evidence.files_written
+
+
+class TestTextOf:
+    """Tests for _text_of helper that flattens various response types to text."""
+
+    def test_none_returns_empty(self):
+        from agent.continuous_work_critic import _text_of
+        assert _text_of(None) == ""
+
+    def test_string_passthrough(self):
+        from agent.continuous_work_critic import _text_of
+        assert _text_of("hello world") == "hello world"
+
+    def test_dict_with_content(self):
+        from agent.continuous_work_critic import _text_of
+        assert _text_of({"content": "test content"}) == "test content"
+
+    def test_dict_without_content(self):
+        from agent.continuous_work_critic import _text_of
+        result = _text_of({"foo": "bar"})
+        assert isinstance(result, str)
+
+    def test_list_of_text_parts(self):
+        from agent.continuous_work_critic import _text_of
+        parts = [{"type": "text", "text": "part1"}, {"type": "text", "text": "part2"}]
+        assert _text_of(parts) == "part1 part2"
+
+    def test_list_of_strings(self):
+        from agent.continuous_work_critic import _text_of
+        assert _text_of(["hello", "world"]) == "hello world"
+
+    def test_openai_message_object(self):
+        """OpenAI ChatCompletionMessage has .content as attribute."""
+        from agent.continuous_work_critic import _text_of
+
+        class FakeMsg:
+            content = "test from attribute"
+
+        assert _text_of(FakeMsg()) == "test from attribute"
+
+    def test_openai_message_with_list_content(self):
+        """OpenAI message with multipart content."""
+        from agent.continuous_work_critic import _text_of
+
+        class FakeMsg:
+            content = [{"type": "text", "text": "part1"}, {"type": "text", "text": "part2"}]
+
+        assert _text_of(FakeMsg()) == "part1 part2"
+
+    def test_openai_message_with_none_content(self):
+        """OpenAI message with None content falls back to str."""
+        from agent.continuous_work_critic import _text_of
+
+        class FakeMsg:
+            content = None
+
+        result = _text_of(FakeMsg())
+        assert isinstance(result, str)
+
+    def test_integer_returns_str(self):
+        from agent.continuous_work_critic import _text_of
+        assert _text_of(42) == "42"
