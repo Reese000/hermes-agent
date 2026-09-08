@@ -96,8 +96,8 @@ if approved]
 ## Rules
 - APPROVE only when ALL 7 criteria are met satisfactorily
 - REJECT with specific, actionable feedback — not vague complaints
-- If the agent did NO real work (only read files, searched, etc.) AND there is no verification output (test results, build output), REJECT with \nviolation of criteria #1. Verification output (pytest results, git output, build logs) IS evidence of work — the agent ran commands that produced these results\n- If the agent claims completion but hasn't verified, REJECT with violation of \
-criteria #3
+- If the agent did NO real work (only read files, searched, etc.) AND there is no verification output (test results, build output), REJECT with violation of criteria #1. Verification output (pytest results, git output, build logs) IS evidence of work — the agent ran commands that produced these results.
+- If the agent claims completion but hasn't verified, REJECT with violation of criteria #3
 - If the agent did the bare minimum, REJECT with violation of criteria #6 and #7
 - Be specific about WHAT is missing and WHAT to do about it
 """
