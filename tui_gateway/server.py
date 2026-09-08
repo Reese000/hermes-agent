@@ -9412,6 +9412,11 @@ def _init_session(
             "tool_progress_mode": _load_tool_progress_mode(),
             "edit_snapshots": {},
             "tool_started_at": {},
+            # Read continuous_work from agent config so CW persists across
+            # restarts.  Without this, CW is always False on session creation
+            # regardless of config.yaml, because the flag was never carried
+            # from the agent's config into the session dict.
+            "continuous_work": bool(getattr(agent, "_continuous_work", False)),
             # Profile-scoped HERMES_HOME for app-global remote mode; None =
             # launch profile. SessionBranch copies the parent's value so the
             # child stays on the same state.db.
@@ -13009,14 +13014,24 @@ def _continuous_work_note(session: dict) -> str:
     termination protocol so the agent keeps working until the work is truly
     exhausted.
     """
+    _agent = session.get("agent")
     if not session.get("continuous_work"):
+        # Keep the agent's override flag in sync: when CW is disabled, the
+        # agent must NOT be in continuous-work mode even if it was enabled
+        # on a previous turn.  Without this, the flag stays True forever
+        # once set, causing CW to remain active even when the toggle shows
+        # disabled.
+        if _agent is not None:
+            try:
+                _agent._continuous_work = False
+            except Exception:
+                pass
         return ""
     from agent.prompt_builder import CONTINUOUS_WORK_GUIDANCE
 
     # Keep the agent's own override flag in sync so the turn-end enforcement
     # gate (agent/continuous_work_gate.py) can refuse a bare "done" when the
     # chat enabled continuous work mid-session on an already-built agent.
-    _agent = session.get("agent")
     if _agent is not None:
         try:
             _agent._continuous_work = True
