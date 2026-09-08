@@ -147,6 +147,7 @@ class TurnEvidence:
     tool_names_used: list[str] = field(default_factory=list)
     total_tool_calls: int = 0
     verification_output: bool = False
+    response_text_length: int = 0
 
     @property
     def has_real_work(self) -> bool:
@@ -175,6 +176,8 @@ class TurnEvidence:
             lines.append(f"Terminal commands ({len(self.terminal_commands)}):")
             for cmd in self.terminal_commands[:20]:  # Cap at 20
                 lines.append(f"  $ {cmd}")
+        if self.response_text_length > 0:
+            lines.append(f"Agent response text: {self.response_text_length} chars")
         if self.verification_output:
             lines.append("Verification output detected (test/build results present)")
         if self.test_results:
@@ -614,6 +617,7 @@ def critic_gate(
 
     # Extract the agent's response text
     response_text = _text_of(final_response)
+    evidence.response_text_length = len(response_text) if response_text else 0
 
     # Invoke the critic — no escape hatches, no override markers
     critic_model = getattr(agent, "_cw_critic_model", None)
