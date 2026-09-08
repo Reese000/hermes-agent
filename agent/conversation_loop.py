@@ -2286,6 +2286,76 @@ def run_conversation(
             should_review_memory=_should_review_memory,
         )
 
+    # ── CW enforcement for early-exit bypass paths ────────────────
+    # The main CW gate runs at the end of the text-response path (~line 9056).
+    # But several early-exit paths (partial stream recovery, housekeeping
+    # fallback, empty response) break BEFORE reaching that gate.  This helper
+    # intercepts those breaks when CW is active: it runs the critic gate and,
+    # if the critic rejects, injects a continuation nudge into messages.
+    #
+    # Call before any early break:
+    #   if _cw_enforce_before_exit(final_response):
+    #       final_response = None
+    #       continue
+    #   break
+    def _cw_enforce_before_exit(fr: str) -> bool:
+        """Return True (must continue) if CW gate rejects the exit."""
+        if not getattr(agent, "_continuous_work", False):
+            return False
+        try:
+            from agent.continuous_work_critic import CircuitBreaker, critic_gate
+            if not hasattr(agent, "_cw_circuit_breaker"):
+                agent._cw_circuit_breaker = CircuitBreaker()
+            _req = ""
+            for _m in reversed(messages):
+                if isinstance(_m, dict) and _m.get("role") == "user":
+                    _c = _m.get("content", "")
+                    if isinstance(_c, str) and not _c.startswith("[System:"):
+                        _req = _c[:2000]
+                        break
+                    elif isinstance(_c, list):
+                        for _p in _c:
+                            if isinstance(_p, dict) and _p.get("type") == "text":
+                                _req = _p.get("text", "")[:2000]
+                                break
+                        if _req:
+                            break
+            nudge = critic_gate(
+                agent=agent,
+                final_response=fr,
+                messages=messages,
+                user_request=_req,
+                circuit_breaker=agent._cw_circuit_breaker,
+            )
+            if nudge is None:
+                logger.info("CW bypass-path gate: APPROVED, allowing exit")
+                return False
+            _cfg = getattr(agent, "_agent_cfg", {}) or {}
+            if not isinstance(_cfg, dict):
+                _cfg = {}
+            _max = int(_cfg.get("continuous_work_max_nudges", 5))
+            _count = getattr(agent, "_continuous_work_nudges", 0)
+            if _count >= _max:
+                logger.warning("CW bypass-path hard ceiling hit — forcing stop")
+                agent._continuous_work = False
+                return False
+            try:
+                from agent.continuous_work_gate import mark_continuous_work_nudge_issued
+                mark_continuous_work_nudge_issued(agent)
+            except Exception:
+                agent._continuous_work_nudges = getattr(agent, "_continuous_work_nudges", 0) + 1
+            append_message(messages, {
+                "role": "user",
+                "content": nudge,
+                "_continuous_work_synthetic": True,
+            })
+            agent._session_messages = messages
+            logger.debug("CW bypass-path gate: REJECTED, forcing continuation")
+            return True
+        except Exception:
+            logger.debug("CW bypass-path gate failed, allowing exit", exc_info=True)
+            return False
+
     while (api_call_count < agent.max_iterations and agent.iteration_budget.remaining > 0) or agent._budget_grace_call:
         _redirect_text = agent._drain_pending_redirect()
         if _redirect_text:
@@ -8464,6 +8534,9 @@ def run_conversation(
                         # gateway fallback delivery can send the recovered
                         # text plus the abnormal-turn explanation.
                         agent._response_was_previewed = False
+                        if _cw_enforce_before_exit(final_response):
+                            final_response = None
+                            continue
                         break
 
                     # If the previous turn already delivered real content alongside
@@ -8490,6 +8563,9 @@ def run_conversation(
                         # fallback text as the final response and break.
                         final_response = agent._strip_think_blocks(fallback).strip()
                         agent._response_was_previewed = True
+                        if _cw_enforce_before_exit(final_response):
+                            final_response = None
+                            continue
                         break
 
                     # ── Post-tool-call empty response nudge ───────────
@@ -8818,6 +8894,9 @@ def run_conversation(
                         )
                     else:
                         final_response = "(empty)"
+                    if _cw_enforce_before_exit(final_response):
+                        final_response = None
+                        continue
                     break
                 
                 # Reset retry counter/signature on successful content

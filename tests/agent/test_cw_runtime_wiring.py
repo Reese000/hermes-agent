@@ -1,9 +1,9 @@
-"""Exercise the REAL conversation-loop gate call site (not a direct call).
+"""Prove the CW bypass enforcement is wired into conversation_loop's turn loop.
 
-Proves two things:
-1. critic_gate is wired into run_conversation's turn loop (AST-level, reachable).
-2. The full gate path (import -> guard -> invoke -> nudge) executes against
-   a simulated turn using the identical call signature the loop uses.
+This test file verifies that the 3 early-exit bypass paths (partial stream
+recovery, housekeeping fallback, empty response) are intercepted by CW
+enforcement when CW is active, preventing agents from terminating without
+critic approval.
 """
 import ast
 import inspect
@@ -87,3 +87,58 @@ class TestCWRuntimeWiring:
                 circuit_breaker=CircuitBreaker(max_strikes=3),
             )
         assert result is None, "approved gate should return None (allow stop)"
+
+
+class TestCWBypassEnforcement:
+    """Proves the early-exit bypass paths are intercepted by CW enforcement."""
+
+    def test_bypass_breaks_have_cw_check(self):
+        """Static: _cw_enforce_before_exit is called before every bypass break."""
+        src = inspect.getsource(conversation_loop)
+        # The function is defined inside run_conversation
+        assert "def _cw_enforce_before_exit(fr: str) -> bool:" in src
+        # It's called at least 3 times (the 3 bypass paths)
+        call_count = src.count("_cw_enforce_before_exit(")
+        assert call_count >= 3, (
+            f"Expected >= 3 bypass enforcement call sites, found {call_count}"
+        )
+
+    def test_bypass_breaks_proceed_to_critic_gate(self):
+        """Static: every bypass check falls through to critic_gate."""
+        src = inspect.getsource(conversation_loop)
+        tree = ast.parse(src)
+        fn = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+        )
+        # Find the _cw_enforce_before_exit function definition
+        func_defs = [
+            n for n in ast.walk(fn)
+            if isinstance(n, ast.FunctionDef) and n.name == "_cw_enforce_before_exit"
+        ]
+        assert func_defs, "_cw_enforce_before_exit not found in run_conversation"
+        # Inside the function, verify it calls critic_gate
+        func_src = ast.get_source_segment(src, func_defs[0])
+        assert "critic_gate(" in func_src, (
+            "_cw_enforce_before_exit does not call critic_gate"
+        )
+
+    def test_bypass_enforcement_has_hard_ceiling(self):
+        """Static: bypass path has the same hard ceiling as the main gate."""
+        src = inspect.getsource(conversation_loop)
+        tree = ast.parse(src)
+        fn = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+        )
+        func_defs = [
+            n for n in ast.walk(fn)
+            if isinstance(n, ast.FunctionDef) and n.name == "_cw_enforce_before_exit"
+        ]
+        func_src = ast.get_source_segment(src, func_defs[0])
+        assert "continuous_work_max_nudges" in func_src, (
+            "bypass path missing hard ceiling check"
+        )
+        assert "hard ceiling hit" in func_src, (
+            "bypass path missing hard ceiling log message"
+        )
