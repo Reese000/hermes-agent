@@ -2301,7 +2301,6 @@ def run_conversation(
     def _cw_enforce_before_exit(fr: str) -> bool:
         """Return True (must continue) if CW gate rejects the exit."""
         if not getattr(agent, "_continuous_work", False):
-            logger.debug("CW bypass gate: _continuous_work is False, allowing exit")
             return False
         try:
             from agent.continuous_work_critic import LoopDetector, critic_gate
@@ -9125,10 +9124,7 @@ def run_conversation(
                 # the critic's feedback. The loop detector prevents
                 # infinite reject loops.
                 _cw_nudge = None
-                _cw_flag = getattr(agent, "_continuous_work", False)
-                if not _cw_flag:
-                    logger.debug("CW gate: _continuous_work is False, skipping gate entirely")
-                if _cw_flag:
+                if getattr(agent, "_continuous_work", False):
                     try:
                         from agent.continuous_work_critic import (
                             LoopDetector,

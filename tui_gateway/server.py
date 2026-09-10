@@ -13015,14 +13015,7 @@ def _continuous_work_note(session: dict) -> str:
     exhausted.
     """
     _agent = session.get("agent")
-    _session_cw = session.get("continuous_work")
-    import logging as _log
-    _log.getLogger("cw.debug").info(
-        "CW note: session[continuous_work]=%s, agent._continuous_work=%s",
-        _session_cw,
-        getattr(_agent, "_continuous_work", "N/A") if _agent else "no agent",
-    )
-    if not _session_cw:
+    if not session.get("continuous_work"):
         # Keep the agent's override flag in sync: when CW is disabled, the
         # agent must NOT be in continuous-work mode even if it was enabled
         # on a previous turn.  Without this, the flag stays True forever
