@@ -10,7 +10,7 @@ import inspect
 from unittest.mock import MagicMock, patch
 
 from agent import conversation_loop
-from agent.continuous_work_critic import CircuitBreaker, CriticVerdict, critic_gate
+from agent.continuous_work_critic import LoopDetector, CriticVerdict, critic_gate
 
 
 class TestCWRuntimeWiring:
@@ -63,7 +63,7 @@ class TestCWRuntimeWiring:
                 final_response="All tests pass.",
                 messages=messages,
                 user_request="run the tests",
-                circuit_breaker=CircuitBreaker(max_strikes=3),
+                loop_detector=LoopDetector(),
             )
         assert mock_invoke.called, "critic LLM not invoked"
         assert nudge is not None and "REJECTED" in nudge
@@ -84,7 +84,7 @@ class TestCWRuntimeWiring:
                 final_response="Finished.",
                 messages=[],
                 user_request="do work",
-                circuit_breaker=CircuitBreaker(max_strikes=3),
+                loop_detector=LoopDetector(),
             )
         assert result is None, "approved gate should return None (allow stop)"
 
@@ -123,8 +123,8 @@ class TestCWBypassEnforcement:
             "_cw_enforce_before_exit does not call critic_gate"
         )
 
-    def test_bypass_enforcement_has_hard_ceiling(self):
-        """Static: bypass path has the same hard ceiling as the main gate."""
+    def test_bypass_enforcement_has_no_artificial_termination(self):
+        """Static: bypass path has no hard ceiling — CW continues until critic approves."""
         src = inspect.getsource(conversation_loop)
         tree = ast.parse(src)
         fn = next(
@@ -136,9 +136,7 @@ class TestCWBypassEnforcement:
             if isinstance(n, ast.FunctionDef) and n.name == "_cw_enforce_before_exit"
         ]
         func_src = ast.get_source_segment(src, func_defs[0])
-        assert "continuous_work_max_nudges" in func_src, (
-            "bypass path missing hard ceiling check"
-        )
-        assert "hard ceiling hit" in func_src, (
-            "bypass path missing hard ceiling log message"
+        # Hard ceiling was removed — CW continues until critic approves
+        assert "continuous_work_max_nudges" not in func_src, (
+            "bypass path should not have hard ceiling"
         )

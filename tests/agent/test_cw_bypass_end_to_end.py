@@ -45,8 +45,8 @@ class TestBypassEnforcementEndToEnd:
             "Function must track nudge count"
         )
 
-    def test_bypass_function_has_hard_ceiling(self):
-        """The bypass path must enforce the same hard ceiling as the main gate."""
+    def test_bypass_function_has_no_artificial_termination(self):
+        """The bypass path must NOT have a hard ceiling — CW continues until critic approves."""
         src = inspect.getsource(conversation_loop)
         tree = ast.parse(src)
         fn = next(
@@ -58,8 +58,7 @@ class TestBypassEnforcementEndToEnd:
             if isinstance(n, ast.FunctionDef) and n.name == "_cw_enforce_before_exit"
         ]
         func_src = ast.get_source_segment(src, func_defs[0])
-        assert "continuous_work_max_nudges" in func_src
-        assert "hard ceiling hit" in func_src
+        assert "continuous_work_max_nudges" not in func_src
 
     def test_bypass_function_injects_nudge_on_rejection(self):
         """When critic rejects, the function must inject a nudge into messages."""

@@ -2303,9 +2303,9 @@ def run_conversation(
         if not getattr(agent, "_continuous_work", False):
             return False
         try:
-            from agent.continuous_work_critic import CircuitBreaker, critic_gate
-            if not hasattr(agent, "_cw_circuit_breaker"):
-                agent._cw_circuit_breaker = CircuitBreaker()
+            from agent.continuous_work_critic import LoopDetector, critic_gate
+            if not hasattr(agent, "_cw_loop_detector"):
+                agent._cw_loop_detector = LoopDetector()
             _req = ""
             for _m in reversed(messages):
                 if isinstance(_m, dict) and _m.get("role") == "user":
@@ -2325,19 +2325,10 @@ def run_conversation(
                 final_response=fr,
                 messages=messages,
                 user_request=_req,
-                circuit_breaker=agent._cw_circuit_breaker,
+                loop_detector=agent._cw_loop_detector,
             )
             if nudge is None:
                 logger.info("CW bypass-path gate: APPROVED, allowing exit")
-                return False
-            _cfg = getattr(agent, "_agent_cfg", {}) or {}
-            if not isinstance(_cfg, dict):
-                _cfg = {}
-            _max = int(_cfg.get("continuous_work_max_nudges", 5))
-            _count = getattr(agent, "_continuous_work_nudges", 0)
-            if _count >= _max:
-                logger.warning("CW bypass-path hard ceiling hit — forcing stop")
-                agent._continuous_work = False
                 return False
             try:
                 from agent.continuous_work_gate import mark_continuous_work_nudge_issued
@@ -9136,7 +9127,7 @@ def run_conversation(
                 if getattr(agent, "_continuous_work", False):
                     try:
                         from agent.continuous_work_critic import (
-                            CircuitBreaker,
+                            LoopDetector,
                             critic_gate,
                         )
                         from agent.continuous_work_gate import (
@@ -9145,8 +9136,8 @@ def run_conversation(
                         )
 
                         # Initialize circuit breaker per-session
-                        if not hasattr(agent, "_cw_circuit_breaker"):
-                            agent._cw_circuit_breaker = CircuitBreaker()
+                        if not hasattr(agent, "_cw_loop_detector"):
+                            agent._cw_loop_detector = LoopDetector()
 
                         # Extract user request from the turn's user message
                         _cw_user_request = ""
@@ -9168,7 +9159,7 @@ def run_conversation(
                             final_response=final_response,
                             messages=messages,
                             user_request=_cw_user_request,
-                            circuit_breaker=agent._cw_circuit_breaker,
+                            loop_detector=agent._cw_loop_detector,
                         )
 
                         if _cw_nudge is None:
@@ -9193,30 +9184,6 @@ def run_conversation(
                             _cw_nudge = None
 
                 if _cw_nudge:
-                    # HARD CEILING: prevent infinite CW loops regardless of
-                    # parser behavior. If the agent has been nudged more than
-                    # continuous_work_max_nudges times in a single turn, force
-                    # it to stop. This is defense-in-depth — the parser fix
-                    # should prevent false rejections, but this guard ensures
-                    # no agent can get stuck in an infinite loop even with old
-                    # code. Configurable via agent.continuous_work_max_nudges.
-                    _agent_cfg = getattr(agent, "_agent_cfg", {}) or {}
-                    if not isinstance(_agent_cfg, dict):
-                        _agent_cfg = {}
-                    MAX_CW_NUDGES = int(_agent_cfg.get("continuous_work_max_nudges", 5))
-                    _nudge_count = getattr(agent, "_continuous_work_nudges", 0)
-                    if _nudge_count >= MAX_CW_NUDGES:
-                        logger.warning(
-                            "CW hard ceiling hit (%d nudges) — forcing stop. "
-                            "This likely indicates a parser bug (critic approved "
-                            "but parser defaulted to REJECTED).",
-                            _nudge_count,
-                        )
-                        _cw_nudge = None
-                        # Override the agent's _continuous_work flag to prevent
-                        # further CW enforcement on this turn
-                        agent._continuous_work = False
-
                     if _cw_nudge:
                         mark_continuous_work_nudge_issued(agent)
                         final_msg["finish_reason"] = "continuous_work_required"

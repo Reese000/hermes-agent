@@ -188,6 +188,32 @@ class TurnEvidence:
         return "\n".join(lines)
 
 
+class CircuitBreaker:
+    """Backward-compatible wrapper around LoopDetector.
+
+    The circuit breaker is effectively disabled (max_strikes=999999) so CW
+    continues indefinitely until the critic approves. Use LoopDetector
+    directly for new code.
+    """
+
+    def __init__(self, max_strikes: int = 999999):
+        self.max_strikes = max_strikes
+        self.strike_count = 0
+        self.last_rejection_reason = ""
+        self.tripped = False
+
+    def record_rejection(self, reason: str) -> str | None:
+        return None  # Never trips — CW continues until critic approves
+
+    def record_approval(self) -> None:
+        self.strike_count = 0
+        self.tripped = False
+
+    @property
+    def strikes_remaining(self) -> int:
+        return max(0, self.max_strikes - self.strike_count)
+
+
 def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
     """Extract evidence of work from the CURRENT TURN's messages only.
 
@@ -288,6 +314,363 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
         evidence.verification_output = True
 
     return evidence
+
+
+def _parse_args(args: Any) -> dict:
+    """Parse tool arguments (may be string or dict)."""
+    if isinstance(args, dict):
+        return args
+    if isinstance(args, str):
+        try:
+            import json
+            return json.loads(args)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
+
+
+# ─── Critic Verdict ───────────────────────────────────────────────────────────
+
+def parse_critic_response(response: str) -> CriticVerdict:
+    """Parse the critic LLM's response into a structured verdict."""
+    if not response:
+        return CriticVerdict(
+            passed=False,
+            status="REJECTED",
+            critique="Critic returned empty response — defaulting to REJECTED.",
+            raw_response=response,
+        )
+
+    # Extract status
+    status_match = re.search(r"\[STATUS\]\s*\n?\s*(APPROVED|REJECTED)", response, re.IGNORECASE)
+    status = status_match.group(1).upper() if status_match else None
+
+    # Extract violations
+    violations_match = re.search(r"\[VIOLATIONS\]\s*\n?(.*?)(?=\[|\Z)", response, re.DOTALL)
+    violations_text = violations_match.group(1).strip() if violations_match else ""
+    violations = [
+        v.strip() for v in re.split(r"[,\n]", violations_text)
+        if v.strip() and v.strip().lower() != "none"
+    ]
+
+    # Extract critique
+    critique_match = re.search(r"\[CRITIQUE\]\s*\n?(.*?)(?=\[|\Z)", response, re.DOTALL)
+    critique = critique_match.group(1).strip() if critique_match else ""
+
+    # Extract required action
+    action_match = re.search(r"\[REQUIRED_ACTION\]\s*\n?(.*?)(?=\[|\Z)", response, re.DOTALL)
+    required_action = action_match.group(1).strip() if action_match else ""
+
+    # If no explicit [STATUS] field, infer from the response content
+    if status is None:
+        # If violations are empty and required action is "None" or empty,
+        # and the critique is positive, treat as approval
+        has_no_violations = not violations or violations_text.lower().strip() == "none"
+        has_no_action = not required_action or required_action.lower().strip().startswith("none")
+        positive_signals = ["substantial", "verified", "solid", "approval", "warrants approval",
+                           "well-structured", "comprehensive", "deserves special recognition",
+                           "exceptional", "meets the bar", "should be considered complete",
+                           "polished", "thorough", "strong"]
+        has_positive_critique = any(sig in critique.lower() for sig in positive_signals)
+
+        if has_no_violations and has_no_action and has_positive_critique:
+            status = "APPROVED"
+        else:
+            status = "REJECTED"
+
+    passed = status == "APPROVED"
+
+    return CriticVerdict(
+        passed=passed,
+        status=status,
+        violations=violations,
+        critique=critique,
+        required_action=required_action,
+        raw_response=response,
+    )
+
+
+# ─── Critic LLM Call ──────────────────────────────────────────────────────────
+
+def _build_critic_prompt(
+    user_request: str,
+    agent_response: str,
+    evidence: TurnEvidence,
+) -> str:
+    """Build the critic review prompt with evidence."""
+    parts = [
+        "## User Request",
+        user_request or "(no explicit request — agent was working autonomously)",
+        "",
+        "## Agent's Final Response",
+        agent_response[:3000] if agent_response else "(empty response)",
+        "",
+        "## Evidence of Work Performed",
+        evidence.summary(),
+        "",
+    ]
+
+    # Add terminal output samples
+    if evidence.terminal_outputs:
+        parts.append("## Terminal Output Samples")
+        for i, output in enumerate(evidence.terminal_outputs[:5]):
+            parts.append(f"### Command {i+1}")
+            parts.append(f"```\n{output[:500]}\n```")
+        parts.append("")
+
+    # Add test results
+    if evidence.test_results:
+        parts.append("## Test/Verification Results")
+        for i, result in enumerate(evidence.test_results[:5]):
+            parts.append(f"### Result {i+1}")
+            parts.append(f"```\n{result[:500]}\n```")
+        parts.append("")
+
+    parts.extend([
+        "## Instructions",
+        "Review the agent's work against all 7 evaluation criteria.",
+        "If the agent performed NO real work (work_tool_calls = 0), REJECT with violation of criterion #1.",
+        "If the agent claims completion but didn't verify, REJECT with violation of criterion #3.",
+        "Respond in the exact format specified in the system prompt.",
+    ])
+
+    return "\n".join(parts)
+
+
+def invoke_critic(
+    *,
+    user_request: str,
+    agent_response: str,
+    evidence: TurnEvidence,
+    critic_model: str | None = None,
+    critic_provider: str | None = None,
+    main_runtime: dict[str, Any] | None = None,
+    timeout: float = 120.0,
+) -> CriticVerdict:
+    """Invoke the adversarial critic LLM and return a structured verdict.
+
+    This is the core enforcement mechanism — a dedicated LLM call that reviews
+    the agent's work adversarially. Not a piggyback on the MCP server, but a
+    purpose-built integration using Hermes' call_llm() infrastructure.
+    """
+    from agent.auxiliary_client import call_llm
+
+    prompt = _build_critic_prompt(user_request, agent_response, evidence)
+
+    messages = [
+        {"role": "system", "content": CRITIC_SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+    try:
+        response = call_llm(
+            task="continuous_work_critic",
+            messages=messages,
+            model=critic_model,
+            provider=critic_provider,
+            main_runtime=main_runtime,
+            timeout=timeout,
+            temperature=0.1,  # Low temperature for consistent judgments
+        )
+
+        # Extract text from response
+        # call_llm returns either a string, a dict, or a ChatCompletion object
+        # (from openai SDK). ChatCompletion has .choices[0].message.content
+        # as attributes, not dict keys. Handle all three cases.
+        raw = ""
+        if isinstance(response, str):
+            raw = response
+        elif hasattr(response, "choices") and response.choices:
+            # ChatCompletion object (openai SDK)
+            msg = response.choices[0].message
+            raw = getattr(msg, "content", "") or ""
+            # For reasoning models (DeepSeek, etc.), the critique may be
+            # in the reasoning field instead of content
+            if not raw.strip() and hasattr(msg, "reasoning") and msg.reasoning:
+                raw = msg.reasoning
+        elif isinstance(response, dict):
+            # Dict fallback
+            choices = response.get("choices", [])
+            if choices:
+                msg = choices[0].get("message", {})
+                raw = msg.get("content", "")
+                if not raw.strip() and msg.get("reasoning"):
+                    raw = msg["reasoning"]
+            else:
+                raw = str(response)
+        else:
+            raw = str(response)
+
+        verdict = parse_critic_response(raw)
+        logger.info(
+            "Critic verdict: %s (violations: %s)",
+            verdict.status,
+            verdict.violations,
+        )
+        return verdict
+
+    except Exception as e:
+        logger.error("Critic LLM call failed: %s", e, exc_info=True)
+        # On failure, default to REJECTED — the agent must keep working
+        return CriticVerdict(
+            passed=False,
+            status="REJECTED",
+            critique=f"Critic LLM call failed: {e}. Defaulting to REJECTED for safety.",
+            required_action="The critic review could not complete. Continue working and try again.",
+            raw_response="",
+        )
+
+
+# ─── Circuit Breaker ──────────────────────────────────────────────────────────
+
+@dataclass
+class LoopDetector:
+    """Detects when the agent is stuck in a loop.
+
+    Tracks three patterns across a sliding window:
+    1. Response loops: agent produces the same text repeatedly
+    2. Tool call loops: agent calls the same tools with same arguments
+    3. Progress stalls: agent stops producing new work
+
+    When a loop is detected, returns specific feedback so the agent
+    can break out. CW continues indefinitely — the detector only
+    provides guidance, never forces termination.
+    """
+
+    max_history: int = 20
+
+    def __init__(self):
+        self._response_hashes: list[str] = []
+        self._tool_signatures: list[str] = []
+        self._work_hashes: list[str] = []
+        self._rejection_reasons: list[str] = []
+
+    def _hash(self, text: str) -> str:
+        """Truncated hash for pattern matching."""
+        import hashlib
+        return hashlib.md5(text.encode()).hexdigest()[:12]
+
+    def _tool_signature(self, tool_calls: list) -> str:
+        """Create a signature from a list of tool calls."""
+        if not tool_calls:
+            return ""
+        sigs = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                args = func.get("arguments", "")
+                # Hash the args to detect same-call patterns
+                sigs.append(f"{name}:{self._hash(str(args))}")
+        return "|".join(sorted(sigs))
+
+    def check_response_loop(self, response: str) -> str | None:
+        """Detect if the agent is repeating the same response."""
+        if not response:
+            return None
+        h = self._hash(response.strip())
+        self._response_hashes.append(h)
+        if len(self._response_hashes) > self.max_history:
+            self._response_hashes = self._response_hashes[-self.max_history:]
+
+        # Count how many times this hash appeared in the last N responses
+        count = self._response_hashes.count(h)
+        if count >= 3:
+            return (
+                f"LOOP DETECTED: You have produced the exact same response "
+                f"{count} times in a row. This is not making progress. "
+                f"Try a completely different approach — different tools, "
+                f"different files, different strategy. The critic rejected "
+                f"your previous attempts for specific reasons listed above. "
+                f"Address those EXACT issues, not the same failed approach."
+            )
+        return None
+
+    def check_tool_call_loop(self, tool_calls: list) -> str | None:
+        """Detect if the agent is calling the same tools repeatedly."""
+        if not tool_calls:
+            return None
+        sig = self._tool_signature(tool_calls)
+        if not sig:
+            return None
+        self._tool_signatures.append(sig)
+        if len(self._tool_signatures) > self.max_history:
+            self._tool_signatures = self._tool_signatures[-self.max_history:]
+
+        count = self._tool_signatures.count(sig)
+        if count >= 3:
+            return (
+                f"LOOP DETECTED: You have made the exact same tool calls "
+                f"{count} times in a row (same tools, same arguments). "
+                f"This is not making progress. The tools you are calling "
+                f"are not solving the problem. Try different commands, "
+                f"different files, or a completely different approach."
+            )
+        return None
+
+    def check_progress_stall(self, evidence: "TurnEvidence") -> str | None:
+        """Detect if the agent has stopped producing new work."""
+        if not evidence.terminal_outputs and not evidence.files_written and not evidence.files_patched:
+            # No work output at all
+            work_hash = "no_work"
+        else:
+            work_hash = self._hash(
+                str(evidence.files_written) + str(evidence.files_patched)
+                + str(evidence.terminal_commands[-3:] if evidence.terminal_commands else "")
+            )
+
+        self._work_hashes.append(work_hash)
+        if len(self._work_hashes) > self.max_history:
+            self._work_hashes = self._work_hashes[-self.max_history:]
+
+        # Count consecutive "no_work" hashes
+        consecutive_no_work = 0
+        for wh in reversed(self._work_hashes):
+            if wh == "no_work":
+                consecutive_no_work += 1
+            else:
+                break
+
+        if consecutive_no_work >= 5:
+            return (
+                f"LOOP DETECTED: You have produced no new work output for "
+                f"{consecutive_no_work} consecutive turns. You are not writing "
+                f"files, running commands, or producing deliverables. "
+                f"Stop talking and start doing. Pick one specific task and "
+                f"execute it with real tool calls."
+            )
+        return None
+
+    def record_work(self, evidence: "TurnEvidence") -> None:
+        """Record that work was done (called on approval or when work is detected)."""
+        if evidence.files_written or evidence.files_patched or evidence.terminal_commands:
+            work_hash = self._hash(
+                str(evidence.files_written) + str(evidence.files_patched)
+            )
+            self._work_hashes.append(work_hash)
+            if len(self._work_hashes) > self.max_history:
+                self._work_hashes = self._work_hashes[-self.max_history:]
+
+    def record_rejection(self, reason: str) -> None:
+        """Record a rejection reason for pattern detection."""
+        self._rejection_reasons.append(reason)
+        if len(self._rejection_reasons) > self.max_history:
+            self._rejection_reasons = self._rejection_reasons[-self.max_history:]
+
+    def get_repetition_feedback(self) -> str:
+        """Check if the same critique keeps appearing."""
+        if len(self._rejection_reasons) < 3:
+            return ""
+        # Check if recent rejections mention the same violations
+        recent = self._rejection_reasons[-5:]
+        if len(set(recent)) <= 2 and len(recent) >= 3:
+            return (
+                "The critic has given you the same feedback repeatedly. "
+                "You are not addressing the specific issues identified. "
+                "Read the critique carefully and fix EXACTLY what it says."
+            )
+        return ""
+
 
 
 def _parse_args(args: Any) -> dict:
@@ -534,60 +917,7 @@ def invoke_critic(
         )
 
 
-# ─── Circuit Breaker ──────────────────────────────────────────────────────────
-
-@dataclass
-class CircuitBreaker:
-    """Prevents infinite reject loops.
-
-    After MAX_STRIKES consecutive rejections without any real work between them,
-    the circuit breaker trips and forces the agent to stop. This prevents the
-    critic from trapping the agent in an infinite loop of rejections.
-
-    Once tripped, subsequent rejections return None (no nudge), allowing the
-    agent's response to be delivered to the user.
-    """
-
-    max_strikes: int = 3
-    strike_count: int = 0
-    last_rejection_reason: str = ""
-    tripped: bool = False
-
-    def record_rejection(self, reason: str) -> str | None:
-        """Record a rejection. Returns override instruction if circuit trips."""
-        # If already tripped, don't fire again — let the response through
-        if self.tripped:
-            return None
-
-        self.strike_count += 1
-        self.last_rejection_reason = reason
-
-        if self.strike_count >= self.max_strikes:
-            self.tripped = True
-            return (
-                f"[CW CRITIC: Circuit breaker tripped after {self.strike_count} "
-                f"consecutive rejections. The agent has been unable to satisfy the "
-                f"critic after {self.max_strikes} attempts.\n\n"
-                f"Last rejection reason: {reason}\n\n"
-                f"The agent MUST continue working until the critic approves. "
-                f"There is no escape hatch, no override admission, no way to "
-                f"disable CW. Fix the issues the critic identified and try again.\n\n"
-                f"The next response will be delivered to the user.]"
-            )
-        return None
-
-    def record_approval(self) -> None:
-        """Reset the circuit breaker on approval."""
-        self.strike_count = 0
-        self.last_rejection_reason = ""
-        self.tripped = False
-
-    @property
-    def strikes_remaining(self) -> int:
-        return max(0, self.max_strikes - self.strike_count)
-
-
-# ─── Main Gate Function ───────────────────────────────────────────────────────
+# ─── Critic Gate ─────────────────────────────────────────────────────────────
 
 def critic_gate(
     *,
@@ -595,7 +925,7 @@ def critic_gate(
     final_response: Any,
     messages: list[dict[str, Any]],
     user_request: str = "",
-    circuit_breaker: CircuitBreaker | None = None,
+    loop_detector: LoopDetector | None = None,
 ) -> str | None:
     """The integrated CW critic gate.
 
@@ -603,14 +933,16 @@ def critic_gate(
     stop. Returns None if the critic approves (allow stop), or a synthetic user
     message to force continuation if the critic rejects.
 
-    This replaces the old pattern-matching gate with a real adversarial review.
-
     The ONLY exit from CW is: the critic certifies the work is complete.
     No escape hatches. No override admissions. No requesting disable.
     If the critic rejects, the agent continues working until the critic approves.
+
+    Loop detection: tracks response patterns, tool call patterns, and work
+    progress to detect when the agent is stuck. When a loop is detected,
+    provides specific feedback so the agent can break out.
     """
-    if circuit_breaker is None:
-        circuit_breaker = CircuitBreaker()
+    if loop_detector is None:
+        loop_detector = LoopDetector()
 
     # Gather evidence from the turn
     evidence = gather_turn_evidence(messages)
@@ -619,7 +951,23 @@ def critic_gate(
     response_text = _text_of(final_response)
     evidence.response_text_length = len(response_text) if response_text else 0
 
-    # Invoke the critic — no escape hatches, no override markers
+    # Check for loops BEFORE invoking the critic
+    loop_feedback = ""
+    response_loop = loop_detector.check_response_loop(response_text)
+    if response_loop:
+        loop_feedback += "\n\n" + response_loop
+    tool_calls_all = [
+        tc for msg in messages if isinstance(msg, dict) and msg.get("role") == "assistant"
+        for tc in (msg.get("tool_calls") or [])
+    ]
+    tool_loop = loop_detector.check_tool_call_loop(tool_calls_all)
+    if tool_loop:
+        loop_feedback += "\n\n" + tool_loop
+    progress_stall = loop_detector.check_progress_stall(evidence)
+    if progress_stall:
+        loop_feedback += "\n\n" + progress_stall
+
+    # Invoke the critic
     critic_model = getattr(agent, "_cw_critic_model", None)
     critic_provider = getattr(agent, "_cw_critic_provider", None)
     main_runtime = getattr(agent, "_main_runtime", None)
@@ -634,28 +982,22 @@ def critic_gate(
     )
 
     if verdict.passed:
-        circuit_breaker.record_approval()
+        loop_detector.record_work(evidence)
         logger.info("CW critic gate: APPROVED")
         return None
 
-    # Critic rejected — record and check circuit breaker
-    override_instruction = circuit_breaker.record_rejection(verdict.critique)
-    if override_instruction:
-        logger.warning("CW critic gate: circuit breaker tripped after %d rejections", circuit_breaker.strike_count)
-        return override_instruction
+    # Critic rejected - record for pattern detection
+    loop_detector.record_rejection(verdict.critique)
 
-    # Build the standard rejection nudge
-    remaining = circuit_breaker.strikes_remaining
+    # Build the rejection nudge with loop feedback
     feedback = verdict.feedback_for_agent
-    feedback += f"\n\n[Critic strikes remaining: {remaining}/{circuit_breaker.max_strikes}]"
+    feedback += loop_detector.get_repetition_feedback()
+    if loop_feedback:
+        feedback += loop_feedback
 
-    logger.info(
-        "CW critic gate: REJECTED (violations: %s, strikes remaining: %d)",
-        verdict.violations,
-        remaining,
-    )
-
+    logger.info("CW critic gate: REJECTED (violations: %s)", verdict.violations)
     return feedback
+
 
 
 def _text_of(final_response: Any) -> str:
@@ -705,7 +1047,7 @@ __all__ = [
     "CRITIC_SYSTEM_PROMPT",
     "TurnEvidence",
     "CriticVerdict",
-    "CircuitBreaker",
+    "LoopDetector",
     "gather_turn_evidence",
     "invoke_critic",
     "critic_gate",

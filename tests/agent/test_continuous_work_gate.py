@@ -219,6 +219,7 @@ class TestNudgeContent:
 
 from agent.continuous_work_critic import (
     CircuitBreaker,
+    LoopDetector,
     CriticVerdict,
     TurnEvidence,
     gather_turn_evidence,
@@ -227,14 +228,12 @@ from agent.continuous_work_critic import (
 
 
 class TestCircuitBreaker:
-    def test_trips_after_max_strikes(self):
+    def test_never_trips(self):
+        """Circuit breaker is disabled — CW continues until critic approves."""
         cb = CircuitBreaker(max_strikes=3)
-        assert cb.record_rejection("r1") is None
-        assert cb.record_rejection("r2") is None
-        msg = cb.record_rejection("r3")
-        assert msg is not None
-        assert "Circuit breaker tripped" in msg
-        assert cb.tripped is True
+        for i in range(10):
+            assert cb.record_rejection(f"r{i}") is None
+        assert cb.tripped is False
 
     def test_does_not_fire_after_trip(self):
         cb = CircuitBreaker(max_strikes=3)
@@ -251,21 +250,18 @@ class TestCircuitBreaker:
         cb.record_approval()
         assert cb.strike_count == 0
         assert cb.tripped is False
-        # Can trip again after reset
+        # Still never trips after reset
         cb.record_rejection("r1")
         cb.record_rejection("r2")
-        msg = cb.record_rejection("r3")
-        assert msg is not None
+        assert cb.record_rejection("r3") is None
 
     def test_strikes_remaining(self):
         cb = CircuitBreaker(max_strikes=3)
         assert cb.strikes_remaining == 3
         cb.record_rejection("r1")
-        assert cb.strikes_remaining == 2
+        assert cb.strikes_remaining == 3  # never decrements
         cb.record_rejection("r2")
-        assert cb.strikes_remaining == 1
-        cb.record_rejection("r3")
-        assert cb.strikes_remaining == 0
+        assert cb.strikes_remaining == 3
 
 
 class TestParseCriticResponse:
@@ -726,7 +722,7 @@ class TestCriticGate:
                 final_response="I did the work.",
                 messages=[{"role": "user", "content": "do work"}],
                 user_request="do work",
-                circuit_breaker=CircuitBreaker(max_strikes=3),
+                loop_detector=LoopDetector(),
             )
         assert result is None
 
@@ -749,34 +745,33 @@ class TestCriticGate:
                 final_response="all done",
                 messages=[{"role": "user", "content": "do work"}],
                 user_request="do work",
-                circuit_breaker=CircuitBreaker(max_strikes=3),
+                loop_detector=LoopDetector(),
             )
         assert result is not None
         assert "REJECTED" in result
         assert "No work done" in result
 
-    def test_circuit_breaker_trips_on_third_rejection(self):
-        """After 3 rejections, circuit breaker trips and returns override message."""
+    def test_loop_detector_provides_feedback_on_repeated_rejection(self):
+        """Loop detector adds feedback when same critique repeats."""
         from unittest.mock import patch, MagicMock
-        from agent.continuous_work_critic import critic_gate, CircuitBreaker, CriticVerdict
+        from agent.continuous_work_critic import critic_gate, LoopDetector, CriticVerdict
 
         agent = MagicMock()
         agent._cw_critic_model = None
         agent._cw_critic_provider = None
         agent._main_runtime = None
 
-        cb = CircuitBreaker(max_strikes=3)
+        ld = LoopDetector()
         rejected = CriticVerdict(passed=False, status="REJECTED", critique="bad", violations=["1"])
 
         with patch("agent.continuous_work_critic.invoke_critic", return_value=rejected):
-            r1 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", circuit_breaker=cb)
-            r2 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", circuit_breaker=cb)
-            assert r1 is not None and "REJECTED" in r1
-            assert r2 is not None and "REJECTED" in r2
+            r1 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", loop_detector=ld)
+            r2 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", loop_detector=ld)
+            r3 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", loop_detector=ld)
 
-            r3 = critic_gate(agent=agent, final_response="done", messages=[], user_request="", circuit_breaker=cb)
-            assert r3 is not None
-            assert "Circuit breaker tripped" in r3
+        assert r1 is not None
+        assert r2 is not None
+        assert r3 is not None
 
     def test_no_escape_hatch_in_gate(self):
         """critic_gate has no override or disable logic."""

@@ -13029,19 +13029,6 @@ def _continuous_work_note(session: dict) -> str:
         return ""
     from agent.prompt_builder import CONTINUOUS_WORK_GUIDANCE
 
-    # Respect the hard ceiling: if the nudge counter has hit the max, the
-    # turn-end gate already set _continuous_work = False to break the loop.
-    # Don't re-enable it — that would bypass the ceiling and trap the agent
-    # in an infinite nudge loop (re-enabled → rejected → re-enabled → ...).
-    _cfg = getattr(_agent, "_agent_cfg", {}) or {} if _agent is not None else {}
-    if not isinstance(_cfg, dict):
-        _cfg = {}
-    _max = int(_cfg.get("continuous_work_max_nudges", 5))
-    _count = getattr(_agent, "_continuous_work_nudges", 0) if _agent is not None else 0
-    if _count >= _max:
-        # Hard ceiling was hit — don't re-enable CW
-        return ""
-
     # Keep the agent's own override flag in sync so the turn-end enforcement
     # gate (agent/continuous_work_gate.py) can refuse a bare "done" when the
     # chat enabled continuous work mid-session on an already-built agent.
