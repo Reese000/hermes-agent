@@ -642,26 +642,27 @@ def parse_critic_response(response: str) -> CriticVerdict:
 
 
 def invoke_critic(
-    *,
     user_request: str,
     agent_response: str,
     evidence: TurnEvidence,
+    timeout: float = 60.0,
     critic_model: str | None = None,
     critic_provider: str | None = None,
-    main_runtime: dict[str, Any] | None = None,
-    timeout: float = 120.0,
+    main_runtime=None,
 ) -> CriticVerdict:
-    """Invoke the adversarial critic LLM with a hard timeout safety net.
+    """Send the critic prompt to an LLM and parse the structured verdict.
 
-    The timeout parameter is passed to call_llm, but some backends may not
-    enforce it. This wrapper adds a threading-based hard timeout to prevent
-    the agent from hanging indefinitely on a stuck LLM call.
-    """
-    """Invoke the adversarial critic LLM and return a structured verdict.
+    Args:
+        user_request: The original user request/task.
+        agent_response: The agent's response being evaluated.
+        evidence: Evidence gathered from the current turn.
+        timeout: LLM call timeout in seconds.
+        critic_model: Optional model override for the critic.
+        critic_provider: Optional provider override for the critic.
+        main_runtime: Optional main_runtime for call_llm.
 
-    This is the core enforcement mechanism — a dedicated LLM call that reviews
-    the agent's work adversarially. Not a piggyback on the MCP server, but a
-    purpose-built integration using Hermes' call_llm() infrastructure.
+    Returns:
+        CriticVerdict with status, violations, critique, and required_action.
     """
     from agent.auxiliary_client import call_llm
 
@@ -672,8 +673,8 @@ def invoke_critic(
         {"role": "user", "content": prompt},
     ]
 
-    # Hard timeout: use threading to enforce a ceiling on the LLM call.
-    # Some backends ignore the timeout param, so we enforce it externally.
+    # Hard timeout: daemon thread + Event ensures the agent never blocks
+    # forever on a hung LLM call. Daemon threads die on process exit.
     import threading
     _hard_timeout = max(timeout * 2, 30.0)  # at least 30s
     _result = [None]
@@ -700,62 +701,63 @@ def invoke_critic(
     _t.start()
     _done.wait(timeout=_hard_timeout)
 
-    try:
-        if not _done.is_set():
-            raise TimeoutError(f"Critic LLM call exceeded hard timeout ({_hard_timeout:.0f}s)")
-        if _error[0] is not None:
-            raise _error[0]
-        response = _result[0]
-
-        # Extract text from response
-        # call_llm returns either a string, a dict, or a ChatCompletion object
-        # (from openai SDK). ChatCompletion has .choices[0].message.content
-        # as attributes, not dict keys. Handle all three cases.
-        raw = ""
-        if isinstance(response, str):
-            raw = response
-        elif hasattr(response, "choices") and response.choices:
-            # ChatCompletion object (openai SDK)
-            msg = response.choices[0].message
-            raw = getattr(msg, "content", "") or ""
-            # For reasoning models (DeepSeek, etc.), the critique may be
-            # in the reasoning field instead of content
-            if not raw.strip() and hasattr(msg, "reasoning") and msg.reasoning:
-                raw = msg.reasoning
-        elif isinstance(response, dict):
-            # Dict fallback
-            choices = response.get("choices", [])
-            if choices:
-                msg = choices[0].get("message", {})
-                raw = msg.get("content", "")
-                if not raw.strip() and msg.get("reasoning"):
-                    raw = msg["reasoning"]
-            else:
-                raw = str(response)
-        else:
-            raw = str(response)
-
-        verdict = parse_critic_response(raw)
-        logger.info(
-            "Critic verdict: %s (violations: %s)",
-            verdict.status,
-            verdict.violations,
-        )
-        return verdict
-
-    except Exception as e:
-        logger.error("Critic LLM call failed: %s", e, exc_info=True)
-        # On failure, default to REJECTED — the agent must keep working
+    if not _done.is_set():
+        logger.error("Critic LLM call exceeded hard timeout (%.0fs)", _hard_timeout)
         return CriticVerdict(
             passed=False,
             status="REJECTED",
-            critique=f"Critic LLM call failed: {e}. Defaulting to REJECTED for safety.",
+            critique=f"Critic LLM call exceeded hard timeout ({_hard_timeout:.0f}s). Defaulting to REJECTED for safety.",
+            required_action="The critic review timed out. Continue working and try again.",
+            raw_response="",
+        )
+
+    if _error[0] is not None:
+        logger.error("Critic LLM call failed: %s", _error[0], exc_info=True)
+        return CriticVerdict(
+            passed=False,
+            status="REJECTED",
+            critique=f"Critic LLM call failed: {_error[0]}. Defaulting to REJECTED for safety.",
             required_action="The critic review could not complete. Continue working and try again.",
             raw_response="",
         )
 
+    response = _result[0]
 
-# ─── Critic Gate ─────────────────────────────────────────────────────────────
+    # Extract text from response
+    # call_llm returns either a string, a dict, or a ChatCompletion object
+    # (from openai SDK). ChatCompletion has .choices[0].message.content
+    # as attributes, not dict keys. Handle all three cases.
+    raw = ""
+    if isinstance(response, str):
+        raw = response
+    elif hasattr(response, "choices") and response.choices:
+        # ChatCompletion object (openai SDK)
+        msg = response.choices[0].message
+        raw = getattr(msg, "content", "") or ""
+        # For reasoning models (DeepSeek, etc.), the critique may be
+        # in the reasoning field instead of content
+        if not raw.strip() and hasattr(msg, "reasoning") and msg.reasoning:
+            raw = msg.reasoning
+    elif isinstance(response, dict):
+        # Dict fallback
+        choices = response.get("choices", [])
+        if choices:
+            msg = choices[0].get("message", {})
+            raw = msg.get("content", "")
+            if not raw.strip() and msg.get("reasoning"):
+                raw = msg["reasoning"]
+        else:
+            raw = str(response)
+    else:
+        raw = str(response)
+
+    verdict = parse_critic_response(raw)
+    logger.info(
+        "Critic verdict: %s (violations: %s)",
+        verdict.status,
+        verdict.violations,
+    )
+    return verdict
 
 def critic_gate(
     *,
