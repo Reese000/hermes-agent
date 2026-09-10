@@ -225,8 +225,8 @@ DEFAULT_CONFIG = {
         # Lower values = faster escape from loops; higher values = more
         # chances for the critic to approve. Default 5.
         "continuous_work_max_nudges": 5,
-        "continuous_work_critic_model": None,
-        "continuous_work_critic_provider": None,
+        "continuous_work_critic_model": "deepseek/deepseek-v4-flash-0731",
+        "continuous_work_critic_provider": "openrouter",
         # Local-environment toolchain probe — surfaces Python/pip/uv/PEP-668
         # state in the system prompt when something non-default is detected
         # (e.g. python3 has no pip module, pip→python version mismatch, PEP
