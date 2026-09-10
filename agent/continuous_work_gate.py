@@ -62,7 +62,7 @@ _REQUIRED_OVERRIDE_COMPONENTS = (
     "certification",
 )
 
-_MAX_DEFAULT_ATTEMPTS = 3
+_MAX_DEFAULT_ATTEMPTS = 999999  # No artificial ceiling — loop detector handles stalls
 
 
 # ---------------------------------------------------------------------------

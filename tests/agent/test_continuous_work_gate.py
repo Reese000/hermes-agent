@@ -117,19 +117,19 @@ class TestRefuses:
         )
         assert nudge is not None
 
-    def test_runs_out_of_budget(self):
+    def test_never_runs_out_of_budget(self):
+        """No hard ceiling — CW continues until critic approves."""
         response = "all done"
         for attempt in range(3):
             nudge = build_continuous_work_nudge(
                 final_response=response, work_evidence_tools=0, attempts=attempt
             )
             assert nudge is not None
-        assert (
-            build_continuous_work_nudge(
-                final_response=response, work_evidence_tools=0, attempts=3
-            )
-            is None
+        # With no hard ceiling, even attempt=999 still produces a nudge
+        nudge = build_continuous_work_nudge(
+            final_response=response, work_evidence_tools=0, attempts=999
         )
+        assert nudge is not None
 
     def test_middle_turn_without_work_but_non_completion_not_refused(self):
         response = "I looked at the specs, here's what I found."
