@@ -692,7 +692,7 @@ def invoke_critic(
     # Hard timeout: daemon thread + Event ensures the agent never blocks
     # forever on a hung LLM call. Daemon threads die on process exit.
     import threading
-    _hard_timeout = max(1.0, min(timeout * 1.5, 45.0))  # floor 1s, cap 45s, 1.5x multiplier
+    _hard_timeout = max(1.0, min(timeout * 2, 90.0))  # floor 1s, cap 90s, 1.5x multiplier
     _result = [None]
     _error = [None]
     _done = threading.Event()

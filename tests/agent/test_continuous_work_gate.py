@@ -782,12 +782,12 @@ class TestInvokeCriticTimeout:
     """Regression tests for invoke_critic timeout behavior."""
 
     def test_hard_timeout_bounds(self):
-        """_hard_timeout is min(timeout*1.5, 45.0)."""
+        """_hard_timeout is min(timeout*2, 90.0)."""
         from agent.continuous_work_critic import invoke_critic
         import inspect
         src = inspect.getsource(invoke_critic)
         # Verify the formula is in the source
-        assert "min(timeout * 1.5, 45.0)" in src or "min(timeout*1.5, 45.0)" in src
+        assert "min(timeout * 2, 90.0)" in src or "min(timeout*2, 90.0)" in src
 
     def test_default_timeout_is_30(self):
         """Default timeout parameter is 30.0 seconds."""
