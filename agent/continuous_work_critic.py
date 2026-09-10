@@ -315,79 +315,7 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
     return evidence
 
 
-def _parse_args(args: Any) -> dict:
-    """Parse tool arguments (may be string or dict)."""
-    if isinstance(args, dict):
-        return args
-    if isinstance(args, str):
-        try:
-            import json
-            return json.loads(args)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    return {}
-
-
 # ─── Critic Verdict ───────────────────────────────────────────────────────────
-
-def parse_critic_response(response: str) -> CriticVerdict:
-    """Parse the critic LLM's response into a structured verdict."""
-    if not response:
-        return CriticVerdict(
-            passed=False,
-            status="REJECTED",
-            critique="Critic returned empty response — defaulting to REJECTED.",
-            raw_response=response,
-        )
-
-    # Extract status
-    status_match = re.search(r"\[STATUS\]\s*\n?\s*(APPROVED|REJECTED)", response, re.IGNORECASE)
-    status = status_match.group(1).upper() if status_match else None
-
-    # Extract violations
-    violations_match = re.search(r"\[VIOLATIONS\]\s*\n?(.*?)(?=\[|\Z)", response, re.DOTALL)
-    violations_text = violations_match.group(1).strip() if violations_match else ""
-    violations = [
-        v.strip() for v in re.split(r"[,\n]", violations_text)
-        if v.strip() and v.strip().lower() != "none"
-    ]
-
-    # Extract critique
-    critique_match = re.search(r"\[CRITIQUE\]\s*\n?(.*?)(?=\[|\Z)", response, re.DOTALL)
-    critique = critique_match.group(1).strip() if critique_match else ""
-
-    # Extract required action
-    action_match = re.search(r"\[REQUIRED_ACTION\]\s*\n?(.*?)(?=\[|\Z)", response, re.DOTALL)
-    required_action = action_match.group(1).strip() if action_match else ""
-
-    # If no explicit [STATUS] field, infer from the response content
-    if status is None:
-        # If violations are empty and required action is "None" or empty,
-        # and the critique is positive, treat as approval
-        has_no_violations = not violations or violations_text.lower().strip() == "none"
-        has_no_action = not required_action or required_action.lower().strip().startswith("none")
-        positive_signals = ["substantial", "verified", "solid", "approval", "warrants approval",
-                           "well-structured", "comprehensive", "deserves special recognition",
-                           "exceptional", "meets the bar", "should be considered complete",
-                           "polished", "thorough", "strong"]
-        has_positive_critique = any(sig in critique.lower() for sig in positive_signals)
-
-        if has_no_violations and has_no_action and has_positive_critique:
-            status = "APPROVED"
-        else:
-            status = "REJECTED"
-
-    passed = status == "APPROVED"
-
-    return CriticVerdict(
-        passed=passed,
-        status=status,
-        violations=violations,
-        critique=critique,
-        required_action=required_action,
-        raw_response=response,
-    )
-
 
 # ─── Critic LLM Call ──────────────────────────────────────────────────────────
 
