@@ -778,3 +778,91 @@ class TestParseStatusFormats:
         assert r1.violations == ["1", "3", "5"]
         r2 = parse_critic_response("[REJECTED]\n\n[VIOLATIONS]\n2, 4\n\n[CRITIQUE]\nBad.\n\n[REQUIRED_ACTION]\nFix")
         assert r2.violations == ["2", "4"]
+class TestInvokeCriticTimeout:
+    """Regression tests for invoke_critic timeout behavior."""
+
+    def test_hard_timeout_bounds(self):
+        """_hard_timeout is min(timeout*1.5, 45.0)."""
+        from agent.continuous_work_critic import invoke_critic
+        import inspect
+        src = inspect.getsource(invoke_critic)
+        # Verify the formula is in the source
+        assert "min(timeout * 1.5, 45.0)" in src or "min(timeout*1.5, 45.0)" in src
+
+    def test_default_timeout_is_30(self):
+        """Default timeout parameter is 30.0 seconds."""
+        import inspect
+        from agent.continuous_work_critic import invoke_critic
+        sig = inspect.signature(invoke_critic)
+        assert sig.parameters['timeout'].default == 30.0
+
+    def test_hard_timeout_fires_on_hanging_call(self):
+        """When call_llm hangs, invoke_critic returns REJECTED within hard timeout."""
+        import time
+        from unittest.mock import patch
+        from agent.continuous_work_critic import invoke_critic, TurnEvidence
+
+        evidence = TurnEvidence()
+        evidence.work_tool_calls = 1
+        evidence.total_tool_calls = 1
+        evidence.verification_output = True
+        evidence.response_text_length = 50
+
+        def hanging_call(**kwargs):
+            time.sleep(300)
+
+        with patch('agent.auxiliary_client.call_llm', side_effect=hanging_call):
+            start = time.time()
+            verdict = invoke_critic(
+                user_request='test', agent_response='done',
+                evidence=evidence, timeout=5.0,
+            )
+            elapsed = time.time() - start
+            # hard_timeout = min(5*1.5, 45) = 7.5s — should fire well before 50s
+            assert elapsed < 50, f"Took {elapsed:.1f}s, should be < 50s"
+            assert verdict.passed is False
+            assert verdict.status == "REJECTED"
+
+    def test_fast_call_completes_normally(self):
+        """When call_llm responds fast, invoke_critic returns the parsed verdict."""
+        from unittest.mock import patch
+        from agent.continuous_work_critic import invoke_critic, TurnEvidence
+
+        evidence = TurnEvidence()
+        evidence.work_tool_calls = 1
+        evidence.total_tool_calls = 1
+        evidence.verification_output = True
+        evidence.response_text_length = 50
+
+        def fast_call(**kwargs):
+            return "[APPROVED]\n\n[VIOLATIONS]\nNone\n\n[CRITIQUE]\nGood.\n\n[REQUIRED_ACTION]\nNone"
+
+        with patch('agent.auxiliary_client.call_llm', side_effect=fast_call):
+            verdict = invoke_critic(
+                user_request='test', agent_response='done',
+                evidence=evidence, timeout=10.0,
+            )
+            assert verdict.passed is True
+            assert verdict.status == "APPROVED"
+
+    def test_exception_in_call_llm_returns_rejected(self):
+        """When call_llm raises, invoke_critic returns REJECTED (fail-closed)."""
+        from unittest.mock import patch
+        from agent.continuous_work_critic import invoke_critic, TurnEvidence
+
+        evidence = TurnEvidence()
+        evidence.work_tool_calls = 1
+        evidence.total_tool_calls = 1
+        evidence.verification_output = True
+        evidence.response_text_length = 50
+
+        def failing_call(**kwargs):
+            raise RuntimeError("API connection failed")
+
+        with patch('agent.auxiliary_client.call_llm', side_effect=failing_call):
+            verdict = invoke_critic(
+                user_request='test', agent_response='done',
+                evidence=evidence, timeout=10.0,
+            )
+            assert verdict.passed is False
+            assert verdict.status == "REJECTED"
