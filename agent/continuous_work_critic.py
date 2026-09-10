@@ -315,7 +315,6 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
     return evidence
 
 
-# ─── Critic Verdict ───────────────────────────────────────────────────────────
 
 # ─── Critic LLM Call ──────────────────────────────────────────────────────────
 
@@ -378,7 +377,6 @@ def _build_critic_prompt(
     return "\n".join(parts)
 
 
-# ─── Critic LLM Call ──────────────────────────────────────────────────────────
 
 @dataclass
 class LoopDetector:
@@ -543,7 +541,6 @@ def _parse_args(args: Any) -> dict:
     return {}
 
 
-# ─── Critic Verdict ───────────────────────────────────────────────────────────
 
 @dataclass
 class CriticVerdict:
@@ -643,7 +640,6 @@ def parse_critic_response(response: str) -> CriticVerdict:
     )
 
 
-# ─── Critic LLM Call ──────────────────────────────────────────────────────────
 
 def invoke_critic(
     *,
