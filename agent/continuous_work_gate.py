@@ -32,19 +32,6 @@ _COMPLETION_SIGNALS = (
     "fully verified",
 )
 
-# The override declaration requires THREE markers. The model must write ALL
-# three in its final message for the gate to accept the override. Missing
-# any one means the override is REJECTED and the agent must continue.
-#
-# 1. The override marker ("I AM OVERRIDING continuous work mode")
-# 2. A personal-failure admission ("I PERSONALLY FAILED")
-# 3. An acceptance of failure ("I accept that this override is a personal
-#    failure, not a valid completion")
-#
-# This triple-marker design is intentionally painful. AI models will not
-# unprompted admit they were wrong — requiring all three forces the agent
-# to either do the real work or write a genuine failure admission it would
-# never voluntarily produce.
 _MAX_DEFAULT_ATTEMPTS = 999999  # No artificial ceiling — loop detector handles stalls
 
 

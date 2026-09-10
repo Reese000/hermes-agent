@@ -4,11 +4,8 @@ The gate is policy-only: given the agent's final response and how many
 work-evidence tool calls ran this turn, it decides whether to refuse the stop
 and force another pass, or to accept it.
 
-Override requires ALL THREE markers:
-  1. "I AM OVERRIDING continuous work mode"
-  2. "I PERSONALLY FAILED"
-  3. "I accept that this override is a personal failure"
-Missing any one is a REJECTED override — the agent must continue.
+No override admissions, no personal failure paths, no escape hatches.
+The only exit is through the CW critic approving the work.
 """
 
 import pytest
