@@ -2344,8 +2344,8 @@ def run_conversation(
             logger.debug("CW bypass-path gate: REJECTED, forcing continuation")
             return True
         except Exception:
-            logger.debug("CW bypass-path gate failed, allowing exit", exc_info=True)
-            return False
+            logger.debug("CW bypass-path gate failed, forcing continuation (fail-closed)", exc_info=True)
+            return True
 
     while (api_call_count < agent.max_iterations and agent.iteration_budget.remaining > 0) or agent._budget_grace_call:
         _redirect_text = agent._drain_pending_redirect()
@@ -9180,8 +9180,8 @@ def run_conversation(
                                 attempts=getattr(agent, "_continuous_work_nudges", 0),
                             )
                         except Exception:
-                            logger.debug("continuous-work fallback gate also failed", exc_info=True)
-                            _cw_nudge = None
+                            logger.debug("continuous-work fallback gate also failed, forcing continuation (fail-closed)", exc_info=True)
+                            _cw_nudge = "[System: Continuous work mode is ON. The CW gate encountered an error but must not allow premature exit. Keep working until the critic approves.]"
 
                 if _cw_nudge:
                     if _cw_nudge:
