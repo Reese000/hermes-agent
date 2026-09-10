@@ -1,6 +1,5 @@
 import { atom } from 'nanostores'
 
-import type { NewSessionPlacement } from '@/app/chat/new-session-drag'
 import {
   liveSessionProjectId,
   NO_PROJECT_ID,
@@ -15,7 +14,7 @@ import { isMissingRestEndpoint, isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { isUnderPath } from '@/lib/path-compare'
 import { persistentAtom } from '@/lib/persisted'
 import { $gateway, activeGateway, ensureActiveGatewayOpen } from '@/store/gateway'
-import { $sidebarShowAllSessions, setSidebarAgentsGrouped } from '@/store/layout'
+import { setSidebarAgentsGrouped } from '@/store/layout'
 import { notify } from '@/store/notifications'
 import {
   $activeGatewayProfile,
@@ -319,8 +318,10 @@ function stillOnProjectsContext(context: ActiveProjectsContext): boolean {
   return activeGateway() === context.gateway && projectProfile() === context.profile
 }
 
-async function activeProjectsContext(profile = projectProfile()): Promise<ActiveProjectsContext> {
-  if (!profile || profile === ALL_PROFILES) {
+async function activeProjectsContext(): Promise<ActiveProjectsContext> {
+  const profile = projectProfile()
+
+  if (!profile) {
     throw new Error('Projects are unavailable while viewing all profiles')
   }
 
@@ -330,7 +331,7 @@ async function activeProjectsContext(profile = projectProfile()): Promise<Active
     gateway = await ensureActiveGatewayOpen()
   }
 
-  if (!gateway || gateway !== activeGateway() || profile !== normalizeProfileKey($activeGatewayProfile.get())) {
+  if (!gateway || gateway !== activeGateway() || profile !== projectProfile()) {
     throw new Error('Active Hermes profile changed while connecting')
   }
 
@@ -379,9 +380,7 @@ interface ProjectTreePayload {
   scoped_session_ids: string[]
 }
 
-// Expanded previews need the complete existing tree window before the renderer
-// finds its two recency groups. Keep the normal three-row payload unchanged.
-const projectTreePreviewLimit = () => ($sidebarShowAllSessions.get() ? 2000 : 3)
+const PROJECT_TREE_PREVIEW_LIMIT = 3
 // The all-profiles fan-out reads one database per profile, so it is allowed the
 // same headroom as the cross-profile session list rather than the interactive
 // default.
@@ -423,7 +422,7 @@ async function refreshProjectTreeOn(context: ActiveProjectsContext): Promise<voi
       res = await gatewayRequestOn<ProjectTreePayload>(
         gateway,
         'projects.tree',
-        projectParams({ preview_limit: projectTreePreviewLimit() }, profile)
+        projectParams({ preview_limit: PROJECT_TREE_PREVIEW_LIMIT }, profile)
       )
     } catch (error) {
       // A remote source switch can leave the first read RPC on a newly-opened
@@ -437,7 +436,7 @@ async function refreshProjectTreeOn(context: ActiveProjectsContext): Promise<voi
       res = await gatewayRequestOn<ProjectTreePayload>(
         gateway,
         'projects.tree',
-        projectParams({ preview_limit: projectTreePreviewLimit() }, profile)
+        projectParams({ preview_limit: PROJECT_TREE_PREVIEW_LIMIT }, profile)
       )
     }
 
@@ -485,7 +484,7 @@ async function refreshProjectTreeAcrossProfiles(): Promise<void> {
 
   try {
     const res = await hermesApi<ProjectTreePayload>({
-      path: `/api/profiles/projects/tree?preview_limit=${projectTreePreviewLimit()}`,
+      path: `/api/profiles/projects/tree?preview_limit=${PROJECT_TREE_PREVIEW_LIMIT}`,
       timeoutMs: PROJECT_TREE_REQUEST_TIMEOUT_MS
     })
 
@@ -513,16 +512,9 @@ let projectSessionsRefreshGeneration = 0
 
 export async function fetchProjectSessions(projectId: string): Promise<SidebarProjectTree | null> {
   const generation = ++projectSessionsRefreshGeneration
-  const profile = projectProfile()
-
-  if (!profile) {
-    return null
-  }
-
-  let context: ActiveProjectsContext | undefined
 
   try {
-    context = await activeProjectsContext()
+    const context = await activeProjectsContext()
 
     const res = await gatewayRequestOn<{ project: SidebarProjectTree | null }>(
       context.gateway,
@@ -535,16 +527,8 @@ export async function fetchProjectSessions(projectId: string): Promise<SidebarPr
     }
 
     return res.project ?? null
-  } catch (error) {
-    if (
-      generation !== projectSessionsRefreshGeneration ||
-      profile !== projectProfile() ||
-      (context && !stillOnProjectsContext(context))
-    ) {
-      return null
-    }
-
-    throw error
+  } catch {
+    return null
   }
 }
 
@@ -772,10 +756,6 @@ export interface CreateProjectInput {
   use?: boolean
   // Free-text project idea; written to IDEA.md at the primary folder on create.
   idea?: string
-  /** Where a "New project" DRAG dropped the project (tab-strip slot / pane
-   *  edge / pane center). The completion side opens the created project's
-   *  fresh session draft exactly there; absent = the plain-click behavior. */
-  dropPlacement?: NewSessionPlacement
 }
 
 // Generate a project idea via the stateless llm.oneshot RPC (inherits the live
@@ -878,27 +858,19 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectI
   let res: { project: ProjectInfo | null }
 
   try {
-    // All profiles filters the sidebar, not the owner of a new project.
-    // Capture the live route so reconnecting cannot retarget the write.
-    const context = await activeProjectsContext(normalizeProfileKey($activeGatewayProfile.get()))
-
-    res = await gatewayRequestOn<{ project: ProjectInfo | null }>(
-      context.gateway,
+    res = await gatewayRequest<{ project: ProjectInfo | null }>(
       'projects.create',
-      projectParams(
-        {
-          name: input.name,
-          folders: input.folders ?? [],
-          primary_path: input.primaryPath,
-          slug: input.slug,
-          description: input.description,
-          icon: input.icon,
-          color: input.color,
-          board_slug: input.boardSlug,
-          use: input.use ?? false
-        },
-        context.profile
-      )
+      projectParams({
+        name: input.name,
+        folders: input.folders ?? [],
+        primary_path: input.primaryPath,
+        slug: input.slug,
+        description: input.description,
+        icon: input.icon,
+        color: input.color,
+        board_slug: input.boardSlug,
+        use: input.use ?? false
+      })
     )
   } catch (err) {
     if (isMissingRpcMethod(err)) {
@@ -932,16 +904,6 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectI
 
     if (input.use) {
       $activeProjectId.set(created.id)
-    }
-
-    // A "New project" DRAG created this: hand the placement to the completion
-    // side so the project's fresh session draft opens exactly where it was
-    // dropped (tab-strip slot / pane edge / pane center). The plain click
-    // path has no placement and keeps its existing behavior.
-    const rootPath = created.primary_path ?? created.folders?.[0]?.path ?? input.primaryPath
-
-    if (input.dropPlacement && rootPath) {
-      $newProjectSessionRequest.set({ path: rootPath, placement: input.dropPlacement })
     }
 
     setSidebarAgentsGrouped(true)
@@ -1142,12 +1104,6 @@ export function openProjectCreate(): void {
   $projectDialog.set({ mode: 'create' })
 }
 
-/** Clear the armed "New project" drag placement — on dialog close, so a later
- *  plain-click create can never inherit a stale arm. */
-export function clearNewProjectDropPlacement(): void {
-  $newProjectDropPlacement.set(null)
-}
-
 export function openProjectRename(project: { id: string; name: string }): void {
   $projectDialog.set({ mode: 'rename', name: project.name, projectId: project.id })
 }
@@ -1268,28 +1224,6 @@ export interface StartWorkSessionRequest {
 }
 
 export const $startWorkSessionRequest = atom<StartWorkSessionRequest | null>(null)
-
-// ── "New project" drag placement ─────────────────────────────────────────────
-// Dragging the project-overview header's "New project" + onto a chat zone arms
-// WHERE the project should start; the dialog flow consumes it on create. Two
-// atoms, mirroring $startWorkSessionRequest's token pattern:
-//
-// - `$newProjectDropPlacement` holds the last armed placement while the
-//   project dialog is open. The dialog submit reads it when its `createProject`
-//   succeeds and forwards it as `CreateProjectInput.dropPlacement`. Cleared on
-//   dialog close so a later plain-click create never inherits a stale arm.
-// - `$newProjectSessionRequest` is the consume-once completion signal: the
-//   controller effect (ContribWiring) watches it, opens the created project's
-//   fresh session draft at the recorded anchor/slot, and drops the request.
-export const $newProjectDropPlacement = atom<NewSessionPlacement | null>(null)
-
-export interface NewProjectSessionRequest {
-  /** The created project's root cwd — the fresh draft starts here. */
-  path: string
-  placement: NewSessionPlacement
-}
-
-export const $newProjectSessionRequest = atom<NewProjectSessionRequest | null>(null)
 
 // The "make a new worktree" intent, from the keyboard or a menu. One dialog is
 // mounted, in the sidebar beside ProjectDialog, and it reads this atom. This

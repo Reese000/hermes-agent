@@ -358,8 +358,6 @@ class TestDefaultContextLengths:
             "deepseek-v4-flash": 1_000_000,
             "deepseek-chat": 1_000_000,
             "deepseek-reasoner": 1_000_000,
-            # Version-less canonical Flash id (2026-09 Flash refresh).
-            "deepseek-flash": 1_000_000,
         }
         for key, value in expected_keys.items():
             assert key in DEFAULT_CONTEXT_LENGTHS, f"{key} missing"
@@ -381,8 +379,6 @@ class TestDefaultContextLengths:
                 ("deepseek/deepseek-v4-flash", 1_000_000),
                 ("deepseek-chat", 1_000_000),
                 ("deepseek-reasoner", 1_000_000),
-                ("deepseek-flash", 1_000_000),
-                ("deepseek/deepseek-flash", 1_000_000),
             ]
             for model_id, expected_ctx in cases:
                 actual = get_model_context_length(model_id)
@@ -1092,14 +1088,13 @@ class TestGetModelContextLength:
         mock_fetch.return_value = {}
         mock_endpoint_fetch.return_value = {}
 
-        # GLM-5-TEE resolves through DEFAULT_CONTEXT_LENGTHS (longest matching GLM key), not the generic default.
+        # GLM-5-TEE matches the "glm" entry in DEFAULT_CONTEXT_LENGTHS
         result = get_model_context_length(
             "zai-org/GLM-5-TEE",
             base_url="https://llm.chutes.ai/v1",
             api_key="test-key",
         )
-        from agent.model_metadata import DEFAULT_CONTEXT_LENGTHS, _longest_key_match
-        assert result == _longest_key_match(DEFAULT_CONTEXT_LENGTHS, "zai-org/glm-5-tee")[1]
+        assert result == 202752  # "glm" entry in DEFAULT_CONTEXT_LENGTHS
 
 
 
@@ -1267,7 +1262,7 @@ class TestStripProviderPrefix:
 
     def test_registered_profile_name_and_alias_are_stripped(self, monkeypatch):
         import providers
-        from providers.base import ProviderProfile
+        from providers import ProviderProfile
 
         monkeypatch.setattr(providers, "_REGISTRY", {})
         monkeypatch.setattr(providers, "_ALIASES", {})

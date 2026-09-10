@@ -10,21 +10,14 @@ from unittest import mock
 import pytest
 
 import hermes_state
-import hermes_state_wal
-import hermes_state_common
-from agent.session_activity import ActivityProvenance, build_activity_snapshot
-from hermes_state import SessionDB
-from hermes_state_common import FTS_SQL, FTS_STORAGE_VERSION, SCHEMA_SQL, SCHEMA_VERSION
-
-
-def _activity_snapshot(db, session_id):
-    """Durable activity snapshot for *session_id* (what gateway/delegate readers build from the row)."""
-    row = db.get_session(session_id)
-    return build_activity_snapshot(
-        last_activity_at=row.get("last_activity_at"),
-        last_activity_description=row.get("last_activity_description"),
-        last_activity_provenance=row.get("last_activity_provenance"),
-    )
+from agent.session_activity import ActivityProvenance
+from hermes_state import (
+    FTS_SQL,
+    FTS_STORAGE_VERSION,
+    SCHEMA_SQL,
+    SCHEMA_VERSION,
+    SessionDB,
+)
 
 
 class _NoFtsCursor(sqlite3.Cursor):
@@ -1708,21 +1701,6 @@ class TestSessionTitleLineage:
         # The unrelated holder keeps its title.
         assert db.get_session("a")["title"] == "shared"
 
-    def test_projected_tip_inherits_root_title_when_untitled(self, db):
-        """A rotation that ended the root before the title carry ran leaves the name on the
-        root only; the projected lineage row must still surface it (exact-title lookups such as
-        `hermes peer dm` -> canonical "Bot Chat", #106165). A titled tip keeps its own title."""
-        import time as _time
-        self._make_compression_chain(db, _time.time() - 3600)
-        db.set_session_title("root", "Bot Chat")
-
-        rows = db.list_sessions_rich(limit=50, order_by_last_active=True, search_query="Bot Chat")
-        assert [(r["id"], r["title"], r["_lineage_root_id"]) for r in rows] == [("tip", "Bot Chat", "root")]
-
-        db.set_session_title("tip", "renamed tip")
-        rows = db.list_sessions_rich(limit=50, order_by_last_active=True)
-        assert [(r["id"], r["title"]) for r in rows] == [("tip", "renamed tip")]
-
 
 
 class TestSanitizeTitle:
@@ -1763,7 +1741,7 @@ class TestSanitizeTitle:
 class TestSchemaInit:
     def test_wal_mode(self, db):
         """Prefer WAL on fixed SQLite; DELETE on WAL-reset-vulnerable builds (#69784)."""
-        from hermes_state_wal import is_sqlite_wal_reset_vulnerable
+        from hermes_state import is_sqlite_wal_reset_vulnerable
 
         cursor = db._conn.execute("PRAGMA journal_mode")
         mode = cursor.fetchone()[0].lower()
@@ -1818,7 +1796,7 @@ class TestSchemaInit:
         This is the architectural invariant: SCHEMA_SQL declares the
         desired schema, _reconcile_columns ensures it matches reality.
         """
-        from hermes_state_common import SCHEMA_SQL
+        from hermes_state import SCHEMA_SQL
 
         expected = SessionDB._parse_schema_columns(SCHEMA_SQL)
         for table_name, declared_cols in expected.items():
@@ -2397,7 +2375,7 @@ class TestListSessionsRich:
         assert row["last_activity_description"] == "starting API call #1"
         assert row["last_activity_provenance"] == "unknown"
 
-        activity = _activity_snapshot(db, "s1")
+        activity = db.get_session_activity("s1")
         assert activity["last_activity_at"] == heartbeat
         assert activity["last_activity_description"] == "starting API call #1"
         assert "phase" not in activity
@@ -2427,7 +2405,7 @@ class TestListSessionsRich:
         assert row["last_activity_at"] == heartbeat
         assert row["last_activity_description"] == ""
         assert row["last_activity_provenance"] == "unknown"
-        activity = _activity_snapshot(db, "s1")
+        activity = db.get_session_activity("s1")
         assert activity["last_activity_at"] == heartbeat
         assert activity["last_activity_description"] == ""
         assert activity["last_activity_provenance"] == "unknown"
@@ -2470,7 +2448,7 @@ class TestListSessionsRich:
         rows = db.list_gateway_sessions(active_only=True)
         assert len(rows) == 1
         assert rows[0]["last_active"] == heartbeat
-        activity = _activity_snapshot(db, "gw-1")
+        activity = db.get_session_activity("gw-1")
         assert activity["last_activity_description"] == "compressing context"
 
     def test_order_by_last_active_surfaces_recently_touched_older_session_first(self, db):
@@ -3130,7 +3108,7 @@ class TestVacuum:
 
     def test_auto_maintenance_freelist_ratio_exactly_at_threshold_skips(self, db, monkeypatch):
         """Gate is strictly greater-than: 25.0% reclaimable does not VACUUM."""
-        from hermes_state_common import AUTO_VACUUM_MIN_FREELIST_RATIO
+        from hermes_state import AUTO_VACUUM_MIN_FREELIST_RATIO
 
         monkeypatch.setattr(db, "prune_sessions", lambda **_kwargs: 1)
         monkeypatch.setattr(db, "_freelist_ratio", lambda: AUTO_VACUUM_MIN_FREELIST_RATIO)
@@ -3170,7 +3148,7 @@ class TestVacuum:
 
     def test_freelist_ratio_reads_real_pragmas(self, db):
         """Real-DB check: freeing most of the file pushes the ratio past the gate."""
-        from hermes_state_common import AUTO_VACUUM_MIN_FREELIST_RATIO
+        from hermes_state import AUTO_VACUUM_MIN_FREELIST_RATIO
 
         db.create_session(session_id="keep", source="cli")
         db.append_message(session_id="keep", role="user", content="hi")
@@ -3556,7 +3534,7 @@ class TestFTS5ToolCallMigration:
             assert len(session_db.search_messages("LEGACYARG")) == 1, \
                 "v23 optimize must index tool_calls JSON into FTS"
             # schema_version bumped once the FTS layer is v23
-            from hermes_state_common import SCHEMA_VERSION
+            from hermes_state import SCHEMA_VERSION
             row = session_db._conn.execute(
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()
@@ -3828,7 +3806,7 @@ class TestFTSExternalContentMigration:
         Mirrors what happened when ``_ensure_fts_schema`` ran inside
         ``_execute_write`` and the process died before the marker writes.
         """
-        from hermes_state_common import FTS_SQL, FTS_TRIGRAM_SQL
+        from hermes_state import FTS_SQL, FTS_TRIGRAM_SQL
 
         conn = db._conn
         db._drop_fts_triggers(conn)
@@ -3893,7 +3871,7 @@ class TestFTSExternalContentMigration:
             assert db.fts_rebuild_status() is None
             assert db.fts_optimize_available() is False
             assert db.get_meta("fts_storage_version") == str(
-                hermes_state_common.FTS_STORAGE_VERSION
+                hermes_state.FTS_STORAGE_VERSION
             )
             assert db._conn.execute(
                 "SELECT name FROM sqlite_master WHERE name LIKE '%_v22_trash%'"
@@ -3935,7 +3913,7 @@ class TestFTSExternalContentMigration:
                 "INSERT INTO state_meta (key, value) VALUES "
                 "('fts_storage_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (str(hermes_state_common.FTS_STORAGE_VERSION),),
+                (str(hermes_state.FTS_STORAGE_VERSION),),
             )
             db._conn.commit()
 
@@ -3950,7 +3928,7 @@ class TestFTSExternalContentMigration:
             assert result["ok"] is True
             assert len(db.search_messages("deployment")) == 1
             assert db.get_meta("fts_storage_version") == str(
-                hermes_state_common.FTS_STORAGE_VERSION
+                hermes_state.FTS_STORAGE_VERSION
             )
             assert db.fts_optimize_available() is False
         finally:
@@ -4297,14 +4275,14 @@ class TestApplyWalProbe:
         import hermes_state
 
         monkeypatch.setattr(
-            hermes_state_wal, "is_sqlite_wal_reset_vulnerable", lambda version_info=None: False
+            hermes_state, "is_sqlite_wal_reset_vulnerable", lambda version_info=None: False
         )
 
 
     def test_sets_wal_on_fresh_connection(self, tmp_path):
         """Probe sees 'delete', then set-pragma runs and returns 'wal'."""
         import sqlite3
-        from hermes_state_wal import apply_wal_with_fallback
+        from hermes_state import apply_wal_with_fallback
 
         class _TracingConn(sqlite3.Connection):
             def __init__(self, *a, **kw):
@@ -4337,7 +4315,7 @@ class TestApplyWalProbe:
         import sys
         import threading
         import sqlite3
-        from hermes_state_wal import apply_wal_with_fallback
+        from hermes_state import apply_wal_with_fallback
 
         db_path = tmp_path / "concurrent.db"
         errors = []
@@ -4383,7 +4361,7 @@ class TestApplyWalProbe:
     def test_returns_wal_not_delete_from_probe(self, tmp_path):
         """Early-return only on 'wal'; 'delete' or 'memory' must fall through to set-pragma."""
         import sqlite3
-        from hermes_state_wal import apply_wal_with_fallback
+        from hermes_state import apply_wal_with_fallback
 
         class _TracingConn(sqlite3.Connection):
             def __init__(self, *a, **kw):
@@ -4463,30 +4441,7 @@ class TestSessionPinAndStaleArchive:
         assert db.set_session_pinned("s1", False) is True
         assert self._pinned(db, "s1") == 0
 
-    def test_pinning_a_hidden_session_makes_it_listable(self, db):
-        """A bot-tile session is born hidden (#106171). Pinning it must clear ``hidden``, or the
-        session is pinned-but-invisible: absent from both the default listing and the back-fill."""
-        db.create_session(session_id="s1", source="cli")
-        db.append_message(session_id="s1", role="user", content="hi")
-        db.set_session_hidden("s1", True)
 
-        db.set_session_pinned("s1", True)
-
-        assert db.get_session("s1")["hidden"] == 0
-        listed_ids = [s["id"] for s in db.list_sessions_rich(min_message_count=1)]
-        assert "s1" in listed_ids
-
-    def test_pinning_the_canonical_bot_chat_leaves_it_hidden(self, db):
-        """The canonical Bot Chat (hidden + exact registry title) is desktop-owned and must stay
-        hidden even when pinned, or it leaks into the Sessions sidebar and loses its rename guard
-        (review on #106180). Unlike an ordinary hidden session, pinning must not clear ``hidden``."""
-        db.create_session(session_id="bot1", source="desktop")
-        db.set_session_title("bot1", db.CANONICAL_BOT_CHAT_TITLE)
-        db.set_session_hidden("bot1", True)
-
-        db.set_session_pinned("bot1", True)
-
-        assert db.get_session("bot1")["hidden"] == 1
 
     # ── pinned back-fill past the page window ─────────────────────────────
     def test_pinned_session_survives_the_limit_window(self, db):
@@ -5744,7 +5699,8 @@ class TestPerformancePragmasEndToEnd:
         # path. Force WAL eligibility so _get_read_conn is truly exercised
         # (established pattern used by the WAL tests above).
         monkeypatch.setattr(
-            hermes_state_wal, "is_sqlite_wal_reset_vulnerable",
+            hermes_state,
+            "is_sqlite_wal_reset_vulnerable",
             lambda version_info=None: False,
         )
         home = tmp_path / "hermes_home"
