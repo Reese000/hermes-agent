@@ -685,13 +685,17 @@ def invoke_critic(
 
     def _do_call():
         try:
+            # Use 10s per-attempt timeout (call_llm retries transient errors
+            # up to 2x, so total could be ~30s). Hard timeout (45s) is the
+            # safety net. Do NOT use the full timeout here — retries multiply it.
+            _attempt_timeout = min(timeout, 10.0)
             _result[0] = call_llm(
                 task="continuous_work_critic",
                 messages=messages,
                 model=critic_model,
                 provider=critic_provider,
                 main_runtime=main_runtime,
-                timeout=timeout,
+                timeout=_attempt_timeout,
                 temperature=0.1,
                 max_tokens=1024,
             )
