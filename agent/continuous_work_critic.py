@@ -678,9 +678,7 @@ def invoke_critic(
     # Hard timeout: daemon thread + Event ensures the agent never blocks
     # forever on a hung LLM call. Daemon threads die on process exit.
     import threading
-    _hard_timeout = max(1.0, min(timeout * 1.5, 45.0))  # floor 1s, cap 120s, 1.5x multiplier
-    with open("C:/Users/reese/AppData/Local/hermes/logs/critic-diagnostic.log", "a") as _f:
-        _f.write(f"CW_CRITIC_DIAGNOSTIC: timeout={timeout:.1f} hard_timeout={_hard_timeout:.1f}\n")
+    _hard_timeout = max(1.0, min(timeout * 1.5, 45.0))  # floor 1s, cap 45s, 1.5x multiplier
     _result = [None]
     _error = [None]
     _done = threading.Event()
