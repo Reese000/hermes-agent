@@ -592,8 +592,8 @@ def parse_critic_response(response: str) -> CriticVerdict:
         )
 
     # Extract status
-    status_match = re.search(r"\[STATUS\]\s*\n?\s*(APPROVED|REJECTED)", response, re.IGNORECASE)
-    status = status_match.group(1).upper() if status_match else None
+    status_match = re.search(r"\[STATUS\]\s*\n?\s*(APPROVED|REJECTED)|\[(APPROVED|REJECTED)\]", response, re.IGNORECASE)
+    status = (status_match.group(1) or status_match.group(2)).upper() if status_match else None
 
     # Extract violations
     violations_match = re.search(r"\[VIOLATIONS\]\s*\n?(.*?)(?=\[|\Z)", response, re.DOTALL)
