@@ -120,6 +120,11 @@ output showing tests, REJECT with violation of criteria #3.
 violation of criteria #6 and #7.
 - Be specific about WHAT is missing and WHAT to do about it.
 - NEVER fabricate evidence. Only cite what is actually in the evidence sections.
+- The agent must NOT stop until the user EXPLICITLY says to stop. Even if
+  all work appears complete and verified, if the user asked a question like
+  "is it ready?" or "anything else?", the agent must keep working and not
+  attempt to terminate. Only APPROVE when the user has given an explicit
+  instruction to stop (e.g., "you can stop", "that's enough", "we're done").
 """
 
 # ─── Evidence Gathering ───────────────────────────────────────────────────────
