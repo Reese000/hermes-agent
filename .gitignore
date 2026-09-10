@@ -220,3 +220,7 @@ native/fts5_cjk/*.so
 
 # Disposable profile created by scripts/probe_active_session_exclusivity.py
 .probe-home/
+
+# ASAR backups and test builds
+apps/desktop/asar-backups/
+apps/desktop/test-build/
