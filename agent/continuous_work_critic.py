@@ -208,7 +208,7 @@ class TurnEvidence:
         if self.test_results:
             lines.append(f"Test results:")
             for result in self.test_results[:10]:  # Cap at 10
-                lines.append(f"  {result[:200]}")
+                lines.append(f"  {result[:300]}")
 
         return "\n".join(lines)
 
@@ -314,7 +314,7 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
             content = str(msg.get("content", ""))
             # Track terminal outputs (tool results that follow terminal calls)
             if content and len(content) > 10:
-                evidence.terminal_outputs.append(content[:500])
+                evidence.terminal_outputs.append(content[:1000])
             # Detect test results — tighter markers to avoid false positives
             # Must contain "passed" or "failed" with a number, or specific
             # test framework markers
@@ -330,7 +330,7 @@ def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
                 or 'unittest' in content_lower
             )
             if is_test_result:
-                evidence.test_results.append(content[:500])
+                evidence.test_results.append(content[:1000])
 
     # Verification output: if the current turn's tool results contain
     # test pass/fail markers, that IS evidence of verification work,
@@ -433,6 +433,15 @@ def _build_critic_prompt(
         "## Evidence of Work Performed",
         evidence.summary(),
         "",
+        "## Evidence Inventory",
+        f"Terminal commands run: {len(evidence.terminal_commands)}",
+        f"Terminal output samples: {len(evidence.terminal_outputs)}",
+        f"Test results: {len(evidence.test_results)}",
+        f"Files written: {len(evidence.files_written)}",
+        f"Files patched: {len(evidence.files_patched)}",
+        f"Verification output detected: {evidence.verification_output}",
+        f"Agent response length: {evidence.response_text_length} chars",
+        "",
     ]
 
     # Add terminal output samples
@@ -454,7 +463,12 @@ def _build_critic_prompt(
     parts.extend([
         "## Instructions",
         "Review the agent's work against all 7 evaluation criteria.",
-        "If the agent performed NO real work (work_tool_calls = 0), REJECT with violation of criterion #1.",
+        "IMPORTANT: Do NOT auto-reject based on work_tool_calls count alone.",
+        "Terminal commands (pytest, git, build tools) ARE real work even if",
+        "work_tool_calls is 0 (the calls may be from earlier turns). Look at",
+        "the Terminal Output Samples and Test Results sections for evidence.",
+        "Only REJECT criterion #1 if there are ZERO terminal outputs AND zero",
+        "files written/patched AND zero test results.",
         "If the agent claims completion but didn't verify, REJECT with violation of criterion #3.",
         "Respond in the exact format specified in the system prompt.",
     ])
@@ -829,6 +843,15 @@ def _build_critic_prompt(
         "## Evidence of Work Performed",
         evidence.summary(),
         "",
+        "## Evidence Inventory",
+        f"Terminal commands run: {len(evidence.terminal_commands)}",
+        f"Terminal output samples: {len(evidence.terminal_outputs)}",
+        f"Test results: {len(evidence.test_results)}",
+        f"Files written: {len(evidence.files_written)}",
+        f"Files patched: {len(evidence.files_patched)}",
+        f"Verification output detected: {evidence.verification_output}",
+        f"Agent response length: {evidence.response_text_length} chars",
+        "",
     ]
 
     # Add terminal output samples
@@ -850,7 +873,12 @@ def _build_critic_prompt(
     parts.extend([
         "## Instructions",
         "Review the agent's work against all 7 evaluation criteria.",
-        "If the agent performed NO real work (work_tool_calls = 0), REJECT with violation of criterion #1.",
+        "IMPORTANT: Do NOT auto-reject based on work_tool_calls count alone.",
+        "Terminal commands (pytest, git, build tools) ARE real work even if",
+        "work_tool_calls is 0 (the calls may be from earlier turns). Look at",
+        "the Terminal Output Samples and Test Results sections for evidence.",
+        "Only REJECT criterion #1 if there are ZERO terminal outputs AND zero",
+        "files written/patched AND zero test results.",
         "If the agent claims completion but didn't verify, REJECT with violation of criterion #3.",
         "Respond in the exact format specified in the system prompt.",
     ])
