@@ -651,6 +651,12 @@ def invoke_critic(
     main_runtime: dict[str, Any] | None = None,
     timeout: float = 120.0,
 ) -> CriticVerdict:
+    """Invoke the adversarial critic LLM with a hard timeout safety net.
+
+    The timeout parameter is passed to call_llm, but some backends may not
+    enforce it. This wrapper adds a threading-based hard timeout to prevent
+    the agent from hanging indefinitely on a stuck LLM call.
+    """
     """Invoke the adversarial critic LLM and return a structured verdict.
 
     This is the core enforcement mechanism — a dedicated LLM call that reviews
