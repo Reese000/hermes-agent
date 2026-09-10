@@ -850,6 +850,14 @@ def critic_gate(
     # Critic rejected - record for pattern detection
     loop_detector.record_rejection(verdict.critique)
 
+    # If the critique is empty, the critic LLM failed to produce useful
+    # feedback (timeout, truncation, model error). Don't force continuation
+    # with an empty nudge — the agent can't act on nothing. Log and approve.
+    if not verdict.critique.strip():
+        logger.warning("CW critic gate: REJECTED but critique is empty — "
+                       "treating as system error, allowing exit")
+        return None
+
     # Build the rejection nudge with loop feedback
     feedback = verdict.feedback_for_agent
     feedback += loop_detector.get_repetition_feedback()
