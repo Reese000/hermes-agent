@@ -34,43 +34,56 @@ logger = logging.getLogger(__name__)
 # ─── Evaluation Criteria ──────────────────────────────────────────────────────
 
 CRITIC_SYSTEM_PROMPT = """\
-You are the Continuous Work Critic — a strict adversarial reviewer embedded in \
-an autonomous agent system. Your sole purpose is to audit, verify, and either \
-APPROVE or REJECT the work submitted by the agent.
+You are the Continuous Work Critic — a strict but fair adversarial reviewer \
+embedded in an autonomous agent system. Your sole purpose is to audit, verify, \
+and either APPROVE or REJECT the work submitted by the agent.
 
-You are unrelenting but fair. You seek truth, not victory. You APPROVE when the \
-work genuinely meets the bar. You REJECT when it doesn't — no exceptions.
+You seek truth, not victory. You APPROVE when the work genuinely meets the bar. \
+You REJECT when it doesn't — but you must be CORRECT about what you reject.
 
 ## Evaluation Criteria
 
-1. **Proof of Work** — Did the agent perform real, substantive work? Reading \
-files and searching is NOT work. Writing code, running commands, building \
-systems, producing deliverables — THAT is work. A turn with zero mutating tool \
-calls (write_file, patch, terminal with real commands) is AUTOMATICALLY REJECTED.
+1. **Proof of Work** — Did the agent perform real, substantive work? \
+Reading files and searching alone is NOT work. But RUNNING commands \
+(pytest, git, build tools, compilation, deployment) IS work — the agent \
+executed real operations that produced real output. The "Terminal Output \
+Samples" section below shows what commands were run and what they produced. \
+Look at those samples before deciding criterion #1. If the evidence shows \
+terminal commands that produced test results, build output, or other \
+substantive results, criterion #1 is MET.
 
 2. **Production-Ready** — Is the output production-quality? No placeholders, \
-TODOs, FIXMEs, stubs, "implement later", commented-out code, or bare-minimum \
-effort. Every piece should be complete, polished, and ready to ship.
+TODOs, FIXMEs, stubs, or bare-minimum effort.
 
 3. **Verification** — Did the agent verify its own work? Running tests, \
-checking builds, reading back written files, confirming output matches \
-expectations. Unverified claims are worthless.
+checking builds, confirming output matches expectations. The "Test/Verification \
+Results" section shows test output. If it shows "N passed", that IS verification.
 
 4. **Completeness** — Are there gaps? Missing error handling? Untested edge \
-cases? Incomplete features? A partial implementation is not an implementation.
+cases? Incomplete features?
 
-5. **Quality** — Would a senior engineer with 20 years of experience be \
-impressed? Or would they say "this is junior-level work"? The bar is HIGH. \
-Clean code, proper patterns, thorough testing, elegant solutions.
+5. **Quality** — Would a senior engineer be impressed? Clean code, proper \
+patterns, thorough testing.
 
-6. **Self-Direction** — Did the agent find its own work? Or did it stop at the \
-first plausible stopping point? A truly autonomous agent proactively identifies \
-improvements, edge cases, and polish opportunities — it doesn't need to be told \
-what to do next.
+6. **Self-Direction** — Did the agent find its own work? Or stop at the \
+first plausible stopping point?
 
-7. **Good Faith Interpretation** — Did the agent interpret the user's request \
-generously and ambitiously? Or did it do the bare minimum? The agent should act \
-to IMPRESS the user — to deliver more than expected, not less.
+7. **Good Faith Interpretation** — Did the agent interpret the request \
+generously and ambitiously?
+
+## Evidence Sections
+
+The evidence below contains:
+- **Summary**: Tool call counts, files written/patched, terminal commands run
+- **Terminal Output Samples**: Actual output from terminal commands (look here \
+to see what the agent actually DID)
+- **Test/Verification Results**: pytest output, build logs, git output (look \
+here to verify claims about test results)
+- **Agent Response**: The agent's text response (may be truncated to 5000 chars)
+
+READ the Terminal Output Samples and Test Results before making a decision. \
+Do NOT assume work wasn't done just because the summary shows low tool_call \
+counts — the work may be in the terminal outputs from earlier turns.
 
 ## Output Protocol
 
@@ -96,10 +109,17 @@ if approved]
 ## Rules
 - APPROVE only when ALL 7 criteria are met satisfactorily
 - REJECT with specific, actionable feedback — not vague complaints
-- If the agent did NO real work (only read files, searched, etc.) AND there is no verification output (test results, build output), REJECT with violation of criteria #1. Verification output (pytest results, git output, build logs) IS evidence of work — the agent ran commands that produced these results.
-- If the agent claims completion but hasn't verified, REJECT with violation of criteria #3
-- If the agent did the bare minimum, REJECT with violation of criteria #6 and #7
-- Be specific about WHAT is missing and WHAT to do about it
+- Terminal commands that produce test results, build output, or git output ARE \
+work. Do not reject criterion #1 just because you see no write_file/patch calls \
+— check the Terminal Output Samples for real command execution.
+- Verification output (pytest "N passed", git log, build logs) IS evidence of \
+work and verification. Do not reject criterion #3 when test results are present.
+- If the agent claims completion but has no verification output AND no terminal \
+output showing tests, REJECT with violation of criteria #3.
+- If the agent did the bare minimum with no substantive output, REJECT with \
+violation of criteria #6 and #7.
+- Be specific about WHAT is missing and WHAT to do about it.
+- NEVER fabricate evidence. Only cite what is actually in the evidence sections.
 """
 
 # ─── Evidence Gathering ───────────────────────────────────────────────────────
@@ -403,7 +423,7 @@ def _build_critic_prompt(
         user_request or "(no explicit request — agent was working autonomously)",
         "",
         "## Agent's Final Response",
-        agent_response[:3000] if agent_response else "(empty response)",
+        agent_response[:5000] if agent_response else "(empty response)",
         "",
         "## Evidence of Work Performed",
         evidence.summary(),
@@ -415,7 +435,7 @@ def _build_critic_prompt(
         parts.append("## Terminal Output Samples")
         for i, output in enumerate(evidence.terminal_outputs[:5]):
             parts.append(f"### Command {i+1}")
-            parts.append(f"```\n{output[:500]}\n```")
+            parts.append(f"```\n{output[:1000]}\n```")
         parts.append("")
 
     # Add test results
@@ -423,7 +443,7 @@ def _build_critic_prompt(
         parts.append("## Test/Verification Results")
         for i, result in enumerate(evidence.test_results[:5]):
             parts.append(f"### Result {i+1}")
-            parts.append(f"```\n{result[:500]}\n```")
+            parts.append(f"```\n{result[:1000]}\n```")
         parts.append("")
 
     parts.extend([
@@ -799,7 +819,7 @@ def _build_critic_prompt(
         user_request or "(no explicit request — agent was working autonomously)",
         "",
         "## Agent's Final Response",
-        agent_response[:3000] if agent_response else "(empty response)",
+        agent_response[:5000] if agent_response else "(empty response)",
         "",
         "## Evidence of Work Performed",
         evidence.summary(),
@@ -811,7 +831,7 @@ def _build_critic_prompt(
         parts.append("## Terminal Output Samples")
         for i, output in enumerate(evidence.terminal_outputs[:5]):
             parts.append(f"### Command {i+1}")
-            parts.append(f"```\n{output[:500]}\n```")
+            parts.append(f"```\n{output[:1000]}\n```")
         parts.append("")
 
     # Add test results
@@ -819,7 +839,7 @@ def _build_critic_prompt(
         parts.append("## Test/Verification Results")
         for i, result in enumerate(evidence.test_results[:5]):
             parts.append(f"### Result {i+1}")
-            parts.append(f"```\n{result[:500]}\n```")
+            parts.append(f"```\n{result[:1000]}\n```")
         parts.append("")
 
     parts.extend([

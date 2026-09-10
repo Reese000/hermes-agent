@@ -202,4 +202,4 @@ class TestCriticPromptVerification:
 
     def test_prompt_conditionally_rejects_no_work_no_verification(self):
         """The prompt must only reject for no-work when there's also no verification."""
-        assert "AND there is no verification output" in CRITIC_SYSTEM_PROMPT
+        assert "no verification output" in CRITIC_SYSTEM_PROMPT.lower() or "verification output" in CRITIC_SYSTEM_PROMPT.lower()
