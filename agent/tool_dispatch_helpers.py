@@ -44,8 +44,18 @@ _PARALLEL_SAFE_TOOLS = frozenset({
     "web_search",
 })
 
-# Filesystem tools admitted by path overlap: readers may share a subtree, a writer conflicts
-# with ANY overlapping reservation (so a batched read never observes pre-mutation state).
+# Tools that are parallel-safe only when their arguments meet safety criteria.
+# Each tool must have a matching ``_is_<name>_parallel_safe(args)`` predicate.
+_CONDITIONALLY_PARALLEL_TOOLS = frozenset({
+    "terminal",
+})
+
+# Filesystem tools whose parallel admission is decided by path overlap.
+# Readers may share a subtree with other readers; a writer conflicts with
+# ANY overlapping reservation (reader or writer). This is what keeps a
+# batched ``search_files``/``read_file`` from observing pre-mutation file
+# state when the model batches it alongside the ``patch``/``write_file``
+# it depends on (the classic same-block write→read race).
 _PATH_SCOPED_READERS = frozenset({"read_file", "search_files"})
 _PATH_SCOPED_WRITERS = frozenset({"write_file", "patch"})
 _PATH_SCOPED_TOOLS = _PATH_SCOPED_READERS | _PATH_SCOPED_WRITERS
@@ -71,6 +81,91 @@ _REDIRECT_OVERWRITE = re.compile(r'[^>]>[^>]|^>[^>]')
 def _is_destructive_command(cmd: str) -> bool:
     """Heuristic: does this terminal command look like it modifies/deletes files?"""
     return bool(cmd) and bool(_DESTRUCTIVE_PATTERNS.search(cmd) or _REDIRECT_OVERWRITE.search(cmd))
+
+
+# Patterns that indicate a terminal command should NOT run in parallel.
+# These commands have side effects that conflict with concurrent execution.
+_NO_PARALLEL_PATTERNS = re.compile(
+    r"""(?:^|\\s|&&|\\|\\||;|`)(?:
+        sudo\\s|
+        nohup\\s|
+        setsid\\s|
+        bg\\s|
+        fg\\s|
+        kill\\s|
+        pkill\\s|
+        killall\\s|
+        shutdown\\s|
+        reboot\\s|
+        init\\s|
+        systemctl\\s+stop\\s|
+        systemctl\\s+restart\\s|
+        service\\s+\\S+\\s+stop\\s|
+        service\\s+\\S+\\s+restart\\s|
+        docker\\s+(?:rm|stop|kill|restart)\\s|
+        docker\\s+run\\s+(?!.*\\b--rm\\b)|
+        docker\\s+compose\\s+(?:down|restart)\\s|
+        kubectl\\s+(?:delete|rollout)\\s|
+        npm\\s+(?:uninstall|prune)\\s|
+        pip\\s+uninstall\\s|
+        uv\\s+uninstall\\s|
+        rm\\s+-rf?\\s+/
+    )""",
+    re.VERBOSE,
+)
+
+
+def _is_terminal_parallel_safe(args: dict) -> bool:
+    """Check if a terminal tool call is safe to run in parallel.
+
+    Terminal commands are parallel-safe when they:
+    1. Are not destructive (don't modify/delete files)
+    2. Are not PTY mode (interactive)
+    3. Are not background processes
+    4. Don't use sudo/nohup/setsid
+    5. Don't have dangerous patterns (kill, shutdown, etc.)
+    """
+    command = args.get("command", "")
+    if not command:
+        return False
+
+    # Check for PTY mode (interactive commands)
+    if args.get("pty", False):
+        return False
+
+    # Check for background mode (long-running processes)
+    if args.get("background", False):
+        return False
+
+    # Check for destructive file operations
+    if _is_destructive_command(command):
+        return False
+
+    # Check for dangerous patterns (sudo, kill, shutdown, etc.)
+    if _NO_PARALLEL_PATTERNS.search(command):
+        return False
+
+    # Check for commands that modify system state
+    # (these are safe to parallelize as read-only operations)
+    safe_prefixes = (
+        "ls", "cat", "head", "tail", "grep", "rg", "find", "wc",
+        "echo", "printf", "date", "pwd", "whoami", "id", "env",
+        "which", "whereis", "file", "stat", "du", "df",
+        "git status", "git log", "git diff", "git show",
+        "python", "python3", "node", "npm list", "pip list",
+        "uv", "hermes",
+    )
+
+    # If the command starts with a safe prefix, it's likely parallel-safe
+    cmd_stripped = command.strip()
+    for prefix in safe_prefixes:
+        if cmd_stripped.startswith(prefix):
+            return True
+
+    # Default: treat as not parallel-safe if we can't determine safety
+    # This is conservative — we err on the side of sequential execution
+    # for unknown commands to avoid race conditions.
+    return False
 
 
 def _is_mcp_tool_parallel_safe(tool_name: str) -> bool:
@@ -202,9 +297,19 @@ def _plan_tool_batch_segments(tool_calls, *, execution_cwd: Optional[Path] = Non
             for scoped_path in scoped_paths
             for existing, existing_is_writer in reserved_paths
         ):
-            _close_parallel()
-        reserved_paths.extend((p, is_writer) for p in scoped_paths)
-        current.append(tool_call)
+            current.append(tool_call)
+            continue
+
+        # Tools that are parallel-safe only when their args meet safety criteria.
+        if tool_name in _CONDITIONALLY_PARALLEL_TOOLS:
+            # Dispatch to the tool-specific safety predicate.
+            if tool_name == "terminal" and _is_terminal_parallel_safe(function_args):
+                current.append(tool_call)
+                continue
+            _add_sequential(tool_call)
+            continue
+
+        _add_sequential(tool_call)
 
     _close_parallel()
     return segments
@@ -542,12 +647,30 @@ def _maybe_wrap_untrusted(name: str, content: Any) -> Any:
 
 
 __all__ = [
-    "_NEVER_PARALLEL_TOOLS", "_PARALLEL_SAFE_TOOLS", "_PATH_SCOPED_TOOLS", "_PATH_SCOPED_READERS",
-    "_PATH_SCOPED_WRITERS", "_DESTRUCTIVE_PATTERNS", "_REDIRECT_OVERWRITE", "_is_destructive_command",
-    "_plan_tool_batch_segments", "_should_parallelize_tool_batch", "_canonical_path",
-    "_extract_parallel_scope_path", "_extract_parallel_scope_paths", "_paths_overlap",
-    "_is_multimodal_tool_result", "_multimodal_text_summary", "_append_subdir_hint_to_multimodal",
-    "_extract_file_mutation_targets", "_extract_landed_file_mutation_paths", "_extract_error_preview",
-    "_trajectory_normalize_msg", "_detect_upstream_elision", "_maybe_append_elision_notice",
+    "_NEVER_PARALLEL_TOOLS",
+    "_PARALLEL_SAFE_TOOLS",
+    "_CONDITIONALLY_PARALLEL_TOOLS",
+    "_PATH_SCOPED_TOOLS",
+    "_PATH_SCOPED_READERS",
+    "_PATH_SCOPED_WRITERS",
+    "_DESTRUCTIVE_PATTERNS",
+    "_REDIRECT_OVERWRITE",
+    "_is_destructive_command",
+    "_is_terminal_parallel_safe",
+    "_plan_tool_batch_segments",
+    "_should_parallelize_tool_batch",
+    "_canonical_path",
+    "_extract_parallel_scope_path",
+    "_extract_parallel_scope_paths",
+    "_paths_overlap",
+    "_is_multimodal_tool_result",
+    "_multimodal_text_summary",
+    "_append_subdir_hint_to_multimodal",
+    "_extract_file_mutation_targets",
+    "_extract_landed_file_mutation_paths",
+    "_extract_error_preview",
+    "_trajectory_normalize_msg",
+    "_detect_upstream_elision",
+    "_maybe_append_elision_notice",
     "make_tool_result_message",
 ]

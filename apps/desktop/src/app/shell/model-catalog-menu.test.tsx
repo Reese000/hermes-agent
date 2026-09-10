@@ -24,6 +24,7 @@ beforeAll(() => {
 })
 
 const getGlobalModelOptions = vi.fn()
+const searchProviderModels = vi.fn()
 
 vi.mock('@/hermes', () => ({
   getGlobalModelOptions: (...args: unknown[]) => getGlobalModelOptions(...args),
@@ -48,6 +49,10 @@ beforeEach(() => {
   getGlobalModelOptions.mockResolvedValue({
     providers: [{ models: ['gemini-3.1-pro', 'gemini-2.5-flash'], name: 'Google', slug: 'google' }]
   })
+  // Default: no openrouter provider in most tests, so the live-search effect
+  // never fires — set anyway so an unexpected call fails loudly instead of
+  // hanging the test on an unresolved promise.
+  searchProviderModels.mockResolvedValue({ models: [] })
 })
 
 afterEach(() => {

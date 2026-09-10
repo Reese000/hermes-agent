@@ -18,11 +18,26 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from agent.prompt_builder import (
-    DEFAULT_AGENT_IDENTITY, EXECUTION_GUIDANCE_MODELS, GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
-    HERMES_AGENT_HELP_GUIDANCE, HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS, KANBAN_GUIDANCE,
-    PARALLEL_TOOL_CALL_GUIDANCE, PLATFORM_HINTS, SESSION_SEARCH_GUIDANCE,
-    SKILLS_GUIDANCE, STEER_CHANNEL_NOTE, TASK_COMPLETION_GUIDANCE, TELEGRAM_RICH_MESSAGES_HINT,
-    TOOL_USE_ENFORCEMENT_GUIDANCE, TOOL_USE_ENFORCEMENT_MODELS, drain_truncation_warnings,
+    CONTINUOUS_WORK_GUIDANCE,
+    DEFAULT_AGENT_IDENTITY,
+    EXECUTION_GUIDANCE_MODELS,
+    GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
+    HERMES_AGENT_HELP_GUIDANCE,
+    HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS,
+    KANBAN_GUIDANCE,
+    MEMORY_GUIDANCE,
+    USER_PROFILE_GUIDANCE,
+    OPENAI_MODEL_EXECUTION_GUIDANCE,
+    PARALLEL_TOOL_CALL_GUIDANCE,
+    PLATFORM_HINTS,
+    SESSION_SEARCH_GUIDANCE,
+    SKILLS_GUIDANCE,
+    STEER_CHANNEL_NOTE,
+    TASK_COMPLETION_GUIDANCE,
+    TELEGRAM_RICH_MESSAGES_HINT,
+    TOOL_USE_ENFORCEMENT_GUIDANCE,
+    TOOL_USE_ENFORCEMENT_MODELS,
+    drain_truncation_warnings,
 )
 from agent import prompt_builder as _pb
 from agent.runtime_cwd import resolve_context_cwd
@@ -269,21 +284,126 @@ def _profile_name_for_home(home: Path) -> str:
         return "default"
 
 
-def _tool_guidance_block(agent: Any) -> Optional[str]:
-    """Tool-aware behavioral guidance, injected only when the tools are loaded."""
-    names = agent.valid_tool_names
-    # With both memory stores disabled no store is built, so the full guidance
-    # would steer the model at a tool that always answers "Memory is not
-    # available"; with only USER.md enabled the narrower block is used.
-    memory_guidance = None
-    if "memory" in names:
-        memory_guidance = _pb.build_memory_guidance(
-            getattr(agent, "_memory_enabled", True),
-            getattr(agent, "_user_profile_enabled", True),
-            skill_manage_available="skill_manage" in names,
-        )
-    # Kanban lifecycle: resolved once at __init__ (_kanban_worker_guidance);
-    # the kanban_show fallback covers code paths that bypass agent_init.
+def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) -> Dict[str, str]:
+    """Assemble the system prompt as three ordered cache tiers.
+
+    Returns a dict with three keys:
+      * ``stable``   — the cross-session-stable prefix, through the coding
+        operating brief when a workspace snapshot follows.
+      * ``context``  — the workspace snapshot followed by the remaining
+        session-stable guidance, context files, and caller-supplied
+        system_message.
+      * ``volatile`` — skills index, memory snapshot, user profile,
+        external memory provider block, timestamp line.
+
+    Joined into a single string by :func:`build_system_prompt` and
+    cached on ``agent._cached_system_prompt`` for the lifetime of the
+    AIAgent.  Hermes never re-renders parts of this string mid-
+    session — that's the only way to keep upstream prompt caches
+    warm across turns.
+    """
+    # Local import to avoid pulling model_tools at module load.  Tests
+    # patch ``run_agent.get_toolset_for_tool`` and similar helpers, so
+    # we resolve through ``_ra()`` to honor those patches.
+    _r = _ra()
+
+    # Resolve the model's context window once so context-file caps can scale
+    # to it (dynamic cap — see prompt_builder._dynamic_context_file_max_chars).
+    # None falls back to the historical flat default. This value is stable for
+    # the life of the conversation, so it does not threaten prompt caching.
+    _ctx_len: Optional[int] = None
+    _cc = getattr(agent, "context_compressor", None)
+    if _cc is not None:
+        _cc_len = getattr(_cc, "context_length", None)
+        if isinstance(_cc_len, int) and _cc_len > 0:
+            _ctx_len = _cc_len
+
+    # ── Stable tier ────────────────────────────────────────────────
+    stable_parts: List[str] = []
+
+    # Try SOUL.md as primary identity unless the caller explicitly skipped it.
+    # Some execution modes (cron) still want HERMES_HOME persona while keeping
+    # cwd project instructions disabled.
+    _soul_loaded = False
+    if agent.load_soul_identity or not agent.skip_context_files:
+        # Scope the SOUL.md read to the agent's OWN home (see _agent_home) —
+        # ambient resolution on a thread that lost the HERMES_HOME ContextVar
+        # reads the launch profile's SOUL.md instead (#50233).
+        _soul_content = _r.load_soul_md(_ctx_len, home_override=_agent_home(agent))
+        if _soul_content:
+            stable_parts.append(_soul_content)
+            _soul_loaded = True
+
+    if not _soul_loaded:
+        # Fallback to hardcoded identity
+        stable_parts.append(DEFAULT_AGENT_IDENTITY)
+
+    # Pointer to the docs (and, when it exists, the hermes-agent skill) for
+    # user questions about Hermes itself. The skill_view() pointer is a
+    # dangling reference in two cases — no skill tools in the toolset
+    # (Blank Slate) OR the hermes-agent skill not installed — so the
+    # variant is chosen AFTER the skills index is built (see below) and
+    # this slot holds its position. Toolset and skill set are fixed
+    # per-session, so cache-safe either way.
+    _has_skill_view = "skill_view" in (agent.valid_tool_names or set())
+    _help_guidance_slot = len(stable_parts)
+    stable_parts.append(HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS)
+
+    # Universal task-completion / no-fabrication guidance.  Applied to ALL
+    # models regardless of tool_use_enforcement gating — the failure modes
+    # this targets (stopping after a stub; fabricating output when a real
+    # path is blocked) are not model-family specific.  Gated only by
+    # config.yaml ``agent.task_completion_guidance`` (default True) so
+    # users who want a leaner prompt can turn it off.
+    if getattr(agent, "_task_completion_guidance", True) and agent.valid_tool_names:
+        stable_parts.append(TASK_COMPLETION_GUIDANCE)
+
+    # Universal parallel-tool-call guidance.  Tells the model to batch
+    # independent tool calls into one assistant turn rather than emitting one
+    # call per turn — the runtime already runs independent calls concurrently
+    # (read-only tools always; non-overlapping path-scoped file ops), so the
+    # only thing missing was steering the model to produce the batch.  Cuts
+    # round-trips and the resent-context cost that compounds over a long
+    # conversation.  Gated by config.yaml ``agent.parallel_tool_call_guidance``
+    # (default True) and only injected when tools are actually loaded.
+    if getattr(agent, "_parallel_tool_call_guidance", True) and agent.valid_tool_names:
+        stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
+
+    # Continuous Work mode: when the user has toggled it on (config.yaml
+    # agent.continuous_work), instruct the agent to keep working until the work
+    # is genuinely complete and to state explicitly when it overrides the
+    # user's instructions to terminate. Not gated on tools — the guidance
+    # applies to any long-running turn. Default off, so the cached prefix is
+    # byte-identical for everyone who hasn't enabled it.
+    if getattr(agent, "_continuous_work", False):
+        stable_parts.append(CONTINUOUS_WORK_GUIDANCE)
+
+    # Tool-aware behavioral guidance: only inject when the tools are loaded
+    tool_guidance = []
+    # MEMORY_GUIDANCE instructs the model to save facts to the built-in
+    # MEMORY.md/USER.md stores. With both disabled in config no store is built,
+    # so the guidance would steer the model at a tool whose every call returns
+    # "Memory is not available". Defaults to True for the rare code paths that
+    # build an agent view without going through agent_init.
+    # When only the user profile store is enabled, the narrower
+    # USER_PROFILE_GUIDANCE is injected instead — the full block instructs the
+    # model to write notes to a MEMORY.md store that does not exist.
+    _mem_enabled = getattr(agent, "_memory_enabled", True)
+    _profile_enabled = getattr(agent, "_user_profile_enabled", True)
+    if "memory" in agent.valid_tool_names:
+        if _mem_enabled:
+            tool_guidance.append(MEMORY_GUIDANCE)
+        elif _profile_enabled:
+            tool_guidance.append(USER_PROFILE_GUIDANCE)
+    if "session_search" in agent.valid_tool_names:
+        tool_guidance.append(SESSION_SEARCH_GUIDANCE)
+    if "skill_manage" in agent.valid_tool_names:
+        tool_guidance.append(SKILLS_GUIDANCE)
+    # Kanban worker/orchestrator lifecycle — only present when the
+    # dispatcher spawned this process (kanban_show check_fn gates on
+    # HERMES_KANBAN_TASK env var). Normal chat sessions never see
+    # this block. Resolved once at __init__ (see _kanban_worker_guidance).
+
     _kanban_guidance = getattr(agent, "_kanban_worker_guidance", None)
     if _kanban_guidance is None and "kanban_show" in names:
         _kanban_guidance = KANBAN_GUIDANCE

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 from utils import safe_json_loads
@@ -123,9 +123,20 @@ class ToolCallGuardrailConfig:
 
     @classmethod
     def from_mapping(
-        cls, data: Mapping[str, Any] | None, *, platform: str | None = None,
+        cls,
+        data: Mapping[str, Any] | None,
+        *,
+        continuous_work: bool = False,
+        platform: str | None = None,
     ) -> "ToolCallGuardrailConfig":
-        """Build config from `tool_loop_guardrails`; nested ``warn_after`` / ``hard_stop_after`` win over flat legacy keys."""
+        """Build config from the `tool_loop_guardrails` config.yaml section.
+
+        ``continuous_work`` (agent.continuous_work) tightens the warning
+        thresholds so a runaway "keep working" loop surfaces sooner instead of
+        silently burning budget: exact_failure 2→1, same_tool_failure 3→2,
+        idempotent_no_progress 2→1. Hard-stop thresholds and loop caps are
+        untouched.
+        """
         if not isinstance(data, Mapping):
             data = {}
         d = cls()
@@ -138,8 +149,121 @@ class ToolCallGuardrailConfig:
             nested = section.get(key, data.get(name)) if isinstance(section, Mapping) else data.get(name)
             return _int_at_least(nested, getattr(d, name), 1)
 
-        thresholds = {name: threshold(name, *src) for name, src in _THRESHOLD_SOURCES.items()}
-        return cls(loop_caps=LoopCapConfig.from_mapping(data.get("loop_caps")), **flags, **thresholds)
+        defaults = cls()
+        hard_stop_enabled = _as_bool(data.get("hard_stop_enabled"), defaults.hard_stop_enabled)
+        non_interactive_hard_stop_enabled = _as_bool(
+            data.get("non_interactive_hard_stop_enabled"),
+            defaults.non_interactive_hard_stop_enabled,
+        )
+        if _is_non_interactive_platform(platform) and non_interactive_hard_stop_enabled:
+            hard_stop_enabled = True
+
+        config = cls(
+            warnings_enabled=_as_bool(data.get("warnings_enabled"), defaults.warnings_enabled),
+            hard_stop_enabled=hard_stop_enabled,
+            non_interactive_hard_stop_enabled=non_interactive_hard_stop_enabled,
+            exact_failure_warn_after=_positive_int(
+                warn_after.get("exact_failure", data.get("exact_failure_warn_after")),
+                defaults.exact_failure_warn_after,
+            ),
+            same_tool_failure_warn_after=_positive_int(
+                warn_after.get("same_tool_failure", data.get("same_tool_failure_warn_after")),
+                defaults.same_tool_failure_warn_after,
+            ),
+            no_progress_warn_after=_positive_int(
+                warn_after.get("idempotent_no_progress", data.get("no_progress_warn_after")),
+                defaults.no_progress_warn_after,
+            ),
+            exact_failure_block_after=_positive_int(
+                hard_stop_after.get("exact_failure", data.get("exact_failure_block_after")),
+                defaults.exact_failure_block_after,
+            ),
+            same_tool_failure_halt_after=_positive_int(
+                hard_stop_after.get("same_tool_failure", data.get("same_tool_failure_halt_after")),
+                defaults.same_tool_failure_halt_after,
+            ),
+            no_progress_block_after=_positive_int(
+                hard_stop_after.get("idempotent_no_progress", data.get("no_progress_block_after")),
+                defaults.no_progress_block_after,
+            ),
+            loop_caps=LoopCapConfig.from_mapping(data.get("loop_caps")),
+        )
+
+        if continuous_work:
+            config = replace(
+                config,
+                exact_failure_warn_after=1,
+                same_tool_failure_warn_after=2,
+                no_progress_warn_after=1,
+            )
+
+        return config
+
+
+# Default session-wide caps, matching Claude Code's v2.1.212 runaway-loop
+# Per-turn (per-agent-loop) caps on runaway-prone tool calls. Counts reset at
+# the start of every agent loop (reset_for_turn), so the limit is "within a
+# single turn" rather than cumulative over the whole session. A single loop
+# issuing dozens of web searches or spawning dozens of subagents is already
+# pathological, so the defaults are deliberately low.
+_DEFAULT_MAX_WEB_SEARCHES_PER_TURN = 50
+_DEFAULT_MAX_SUBAGENTS_PER_TURN = 50
+
+
+@dataclass(frozen=True)
+class LoopCapConfig:
+    """Per-turn caps on runaway-prone tool calls.
+
+    Inspired by Claude Code v2.1.212 (Week 29, July 2026), which added caps on
+    WebSearch calls and subagent spawns to stop runaway search / delegation
+    loops. Here the caps count *within a single agent loop* (one turn): the
+    counters reset in ``reset_for_turn`` at the start of every
+    ``run_conversation``, so a legitimate multi-turn session is never starved,
+    but a single turn that spirals into an unbounded search / delegation loop
+    is stopped.
+
+    Semantics differ from the per-turn loop *detector* above (which keys on
+    repeated identical/failing calls): these caps are a hard ceiling on the
+    total count of a tool within the turn and fire regardless of
+    ``hard_stop_enabled``. A value of ``0`` disables the cap (unlimited).
+    """
+
+    max_web_searches: int = _DEFAULT_MAX_WEB_SEARCHES_PER_TURN
+    max_subagents: int = _DEFAULT_MAX_SUBAGENTS_PER_TURN
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> "LoopCapConfig":
+        """Build config from the ``tool_loop_guardrails.loop_caps`` section."""
+        if not isinstance(data, Mapping):
+            return cls()
+        defaults = cls()
+        return cls(
+            max_web_searches=_non_negative_int(
+                data.get("max_web_searches"), defaults.max_web_searches
+            ),
+            max_subagents=_non_negative_int(
+                data.get("max_subagents"), defaults.max_subagents
+            ),
+        )
+
+
+_INTERACTIVE_PLATFORMS = frozenset({"cli", "tui", "desktop", "acp"})
+
+# Platforms that are not chat gateways but whose work is a bounded, supervised
+# task loop: a subagent inherits its parent's budget and is stopped by the
+# parent; api_server runs have a live client holding the request. Both do
+# real edit -> re-run work, so they keep the interactive (warn-only) default.
+_SUPERVISED_TASK_PLATFORMS = frozenset({"subagent", "api_server"})
+
+
+def _is_non_interactive_platform(platform: str | None) -> bool:
+    """Return true for gateway/cron sessions where tool loops are unattended."""
+    if not isinstance(platform, str) or not platform.strip():
+        return False
+    key = platform.strip().lower()
+    if key in _INTERACTIVE_PLATFORMS or key in _SUPERVISED_TASK_PLATFORMS:
+        return False
+    return True
 
 
 @dataclass(frozen=True)

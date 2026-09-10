@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router'
 import { ConnectionSwitcher } from '@/app/chat/sidebar/connection-switcher'
 import type { CommandCenterSection } from '@/app/command-center'
 import { useApprovalModeStatusbarItem } from '@/app/shell/approval-mode-menu'
+import { useContinuousWorkStatusbarItem } from '@/app/shell/continuous-work-statusbar'
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
 import { useContextBreakdown } from '@/app/shell/hooks/use-context-breakdown'
@@ -287,6 +288,7 @@ export function useStatusbarItems({
   const tokensPerSecond = tokensPerSecondLabel(currentUsage)
 
   const approvalModeItem = useApprovalModeStatusbarItem(activeGatewayProfile, requestGateway)
+  const continuousWorkItem = useContinuousWorkStatusbarItem(activeSessionId, requestGateway)
   const systemResourcesItem = useSystemResourcesStatusbarItem()
 
   const gatewayMenuContent = useMemo(
@@ -613,6 +615,10 @@ export function useStatusbarItems({
         toggleLabel: copy.toggleApprovalMode
       },
       {
+        ...continuousWorkItem,
+        hidden: gatewayState !== 'open'
+      },
+      {
         actionId: 'view.showTerminal',
         className: `w-7 justify-center px-0${terminalShowing ? ' bg-accent/55 text-foreground' : ''}`,
         hidden: !chatOpen,
@@ -633,6 +639,7 @@ export function useStatusbarItems({
       cacheHit,
       chatOpen,
       clientVersionItem,
+      continuousWorkItem,
       contextBar,
       contextBreakdown,
       contextBreakdownLoading,

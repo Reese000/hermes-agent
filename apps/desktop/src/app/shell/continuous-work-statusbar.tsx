@@ -1,0 +1,84 @@
+import { useStore } from '@nanostores/react'
+import { useCallback, useMemo } from 'react'
+
+import type { StatusbarItem } from '@/app/shell/statusbar-controls'
+import {
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator
+} from '@/components/ui/dropdown-menu'
+import { useI18n } from '@/i18n'
+import { setContinuousWork } from '@/api/config'
+import { Zap, ZapFilled } from '@/lib/icons'
+import { $continuousWorkBySession, setContinuousWorkForSession } from '@/store/continuous-work'
+
+/**
+ * Per-conversation continuous-work statusbar item. Reads and writes the
+ * ACTIVE session's flag (keyed by runtime session id), so one chat's toggle
+ * never leaks into another.
+ *
+ * When requestGateway is provided, also calls session.set_continuous_work
+ * RPC to propagate the flag to the running agent mid-turn (not just on
+ * the next submit).
+ */
+export function useContinuousWorkStatusbarItem(
+  sessionId: string | null,
+  requestGateway?: <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>
+): StatusbarItem {
+  const { t } = useI18n()
+  const copy = t.composer
+  const active = useStore($continuousWorkBySession)[sessionId ?? ''] ?? false
+
+  const setEnabled = useCallback(
+    (enabled: boolean) => {
+      setContinuousWorkForSession(sessionId, enabled)
+      // Propagate to running agent mid-turn via WebSocket RPC
+      if (requestGateway && sessionId) {
+        requestGateway('session.set_continuous_work', {
+          session_id: sessionId,
+          enabled
+        }).catch(() => { /* ignore — agent may not be running */ })
+      }
+      // Persist to config.yaml so headless agents (kanban workers, cron,
+      // new sessions) inherit CW. Only when a live gateway is present
+      // (requestGateway provided) — the tests / minimal harness call
+      // without it, and there's no hermesDesktop API bridge there.
+      if (requestGateway) {
+        void setContinuousWork(enabled).catch(() => { /* non-fatal */ })
+      }
+    },
+    [sessionId, requestGateway]
+  )
+
+  const toggle = useMemo(() => () => setEnabled(!active), [active, setEnabled])
+
+  return {
+    className: active ? 'bg-(--chrome-action-hover) text-foreground' : undefined,
+    icon: active ? <ZapFilled className="size-3.5" /> : <Zap className="size-3.5 opacity-70" />,
+    id: 'continuous-work',
+    label: active ? 'CW On' : 'CW Off',
+    menuAlign: 'end',
+    menuClassName: 'w-64 p-1',
+    menuContent: (
+      <>
+        <DropdownMenuLabel>{copy.continuousWork}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup
+          onValueChange={value => setEnabled(value === 'on')}
+          value={active ? 'on' : 'off'}
+        >
+          <DropdownMenuRadioItem value="on">
+            <span className="min-w-0 flex-1">{copy.continuousWorkActive}</span>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="off">
+            <span className="min-w-0 flex-1">{copy.continuousWorkOff}</span>
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </>
+    ),
+    onSelect: toggle,
+    title: active ? copy.continuousWorkActive : copy.continuousWorkOff,
+    variant: 'menu'
+  }
+}

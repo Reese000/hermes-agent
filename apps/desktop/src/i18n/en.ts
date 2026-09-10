@@ -1169,7 +1169,9 @@ export const en: Translations = {
         mcp: { label: 'MCP', hint: 'MCP tool routing' },
         title_generation: { label: 'Title gen', hint: 'Session titles' },
         review: { label: 'Review', hint: '/review reviewer subagent' },
-        curator: { label: 'Curator', hint: 'Skill-usage review' }
+        curator: { label: 'Curator', hint: 'Skill-usage review' },
+        subagent: { label: "Subagent (delegate_task)", hint: "Model for child agents" },
+        prompt_enhance: { label: 'Prompt Enhance', hint: 'Rewrite user prompts' }
       }
     },
     localModels: {
@@ -2661,6 +2663,14 @@ export const en: Translations = {
     transcribingDictation: 'Transcribing dictation',
     voiceControls: 'Voice',
     voiceDictation: 'Voice dictation',
+    enhance: 'Enhance prompt',
+    enhancing: 'Enhancing...',
+    enhanceFailed: 'Enhance failed',
+    enhanceRateLimited: 'Too fast — wait a few seconds and try again',
+    enhanceTooLong: 'Prompt too long for enhancement',
+    continuousWork: 'Continuous work',
+    continuousWorkActive: 'Continuous work mode — agent will keep working until all tasks are done',
+    continuousWorkOff: 'Continuous work mode off',
     speakReplies: 'Read replies aloud',
     stopSpeakingReplies: 'Stop reading replies aloud',
     wakeWordListening: phrase => `Wake word: "${phrase}" — listening`,
@@ -3817,6 +3827,9 @@ export const en: Translations = {
     yoloSystem: active => `YOLO ${active ? 'on' : 'off'} for this session`,
     yoloTitle: 'YOLO',
     yoloToggleFailed: 'Could not toggle YOLO',
+    cwOn: 'Continuous Work mode ON — adversarial critic will review all work before allowing stop',
+    cwOff: 'Continuous Work mode OFF',
+    cwSystem: active => `Continuous Work mode ${active ? 'enabled. The adversarial critic will review all work before allowing the agent to stop.' : 'disabled.'}`,
     profileStatus: current =>
       `Profile: ${current}. Use /profile <name> or the "New session" picker to start a chat in another profile.`,
     unknownProfile: 'Unknown profile',
@@ -3951,5 +3964,19 @@ export const en: Translations = {
       description: 'Displays the mobile sidebar.',
       toggle: open => `${open ? 'Show' : 'Hide'} sidebar`
     }
+  },
+  usage: {
+    costLabel: 'Session cost',
+    inputTokens: 'Input tokens',
+    outputTokens: 'Output tokens',
+    cacheReadTokens: 'Cache read',
+    cacheHitRate: 'Cache hit rate',
+    reasoningTokens: 'Reasoning tokens',
+    estimatedCost: 'Estimated cost',
+    actualCost: 'Actual cost',
+    costPerHour: 'Cost/hour',
+    tokensPerSecond: 'Tokens/sec',
+    elapsed: 'Elapsed',
+    calls: 'API calls'
   }
 }

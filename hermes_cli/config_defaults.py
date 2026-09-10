@@ -148,6 +148,29 @@ DEFAULT_CONFIG = {
         # read-only commands) into one batched turn; the runtime already runs them concurrently. ~70
         # cached tokens. False disables.
         "parallel_tool_call_guidance": True,
+        # Continuous Work mode — when True, the agent is instructed (via a
+        # system-prompt suffix) to keep working until all tasks are genuinely
+        # complete or perfection is certified, and to state explicitly when it
+        # overrides the user's instructions to terminate. Also tightens the
+        # tool-loop guardrail warning thresholds (agent/tool_guardrails.py) so
+        # the mode cannot enable runaway loops. Toggled from the desktop
+        # composer and persisted to config.yaml so every new agent build picks
+        # it up. Default False (feature off).
+        "continuous_work": False,
+        # Pre-enable Continuous Work for all new sessions. When True, every
+        # new session starts with CW active — the adversarial critic will
+        # review all work before allowing the agent to stop. The agent can
+        # still toggle CW off mid-session via [CW OFF] marker, and the user
+        # can toggle via /cw command or statusbar. Default False.
+        "continuous_work_default": False,
+        # Maximum number of CW nudges per turn before the hard ceiling kicks
+        # in and forces the agent to stop. This prevents infinite loops when
+        # the critic approves but the parser defaults to REJECTED (old code).
+        # Lower values = faster escape from loops; higher values = more
+        # chances for the critic to approve. Default 5.
+        "continuous_work_max_nudges": 5,
+        "continuous_work_critic_model": "deepseek/deepseek-v4-flash-0731",
+        "continuous_work_critic_provider": "openrouter",
         # Toolchain probe: surfaces Python/pip/uv/PEP-668 state in the system prompt only when
         # something non-default is detected (no pip module, pip/python mismatch, PEP 668 without
         # uv); zero tokens when clean. Skipped for docker/modal/ssh backends (own probe).

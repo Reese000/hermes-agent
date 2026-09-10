@@ -1032,7 +1032,9 @@ export const zhHant = defineLocale({
         mcp: { label: 'MCP', hint: 'MCP 工具路由' },
         title_generation: { label: '標題生成', hint: '工作階段標題' },
         review: { label: '評審', hint: '/review 評審子代理' },
-        curator: { label: '策展器', hint: '技能使用審查' }
+        curator: { label: '策展器', hint: '技能使用審查' },
+        subagent: { label: '子代理 (delegate_task)', hint: '子代理使用的模型' },
+        prompt_enhance: { label: '提示增強', hint: '重寫使用者提示' }
       }
     },
     localModels: {
@@ -2210,6 +2212,14 @@ export const zhHant = defineLocale({
     transcribingDictation: '正在轉寫聽寫',
     voiceControls: '語音',
     voiceDictation: '語音聽寫',
+    enhance: '增強提示',
+    enhancing: '增強中...',
+    enhanceFailed: '增強失敗',
+    enhanceRateLimited: '操作過快 — 請等待幾秒後重試',
+    enhanceTooLong: '提示詞過長，無法增強',
+    continuousWork: '連續工作',
+    continuousWorkActive: '連續工作模式 — 代理將持續工作，直到所有任務完成',
+    continuousWorkOff: '連續工作模式已關閉',
     speakReplies: '朗讀回覆',
     stopSpeakingReplies: '停止朗讀回覆',
     wakeWordListening: phrase => `喚醒詞:「${phrase}」— 正在聆聽`,
@@ -2303,6 +2313,21 @@ export const zhHant = defineLocale({
         text: '請解釋這是如何運作的，並告訴我關鍵檔案在哪裡。'
       }
     }
+  },
+
+  usage: {
+    costLabel: '工作階段費用',
+    inputTokens: '輸入詞元',
+    outputTokens: '輸出詞元',
+    cacheReadTokens: '快取讀取',
+    cacheHitRate: '快取命中率',
+    reasoningTokens: '推理詞元',
+    estimatedCost: '預估費用',
+    actualCost: '實際費用',
+    costPerHour: '每小時成本',
+    tokensPerSecond: '每秒詞元數',
+    elapsed: '已用時間',
+    calls: 'API 呼叫'
   },
 
   statusStack: {
@@ -3240,6 +3265,9 @@ export const zhHant = defineLocale({
     yoloSystem: active => `此工作階段 YOLO ${active ? '已開啟' : '已關閉'}`,
     yoloTitle: 'YOLO',
     yoloToggleFailed: '無法切換 YOLO',
+    cwOn: '連續工作模式 ON — 對抗性評論員將在允許停止之前審查所有工作',
+    cwOff: '連續工作模式 OFF',
+    cwSystem: active => `連續工作模式${active ? '已啟用。對抗性評論員將在允許代理停止之前審查所有工作。' : '已停用。'}`,
     profileStatus: current => `設定檔：${current}。使用 /profile <name> 或「新工作階段」選擇器在其他設定檔中開始聊天。`,
     unknownProfile: '未知設定檔',
     noProfileNamed: (target, available) => `沒有名為「${target}」的設定檔。可用的：${available}`,

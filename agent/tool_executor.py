@@ -56,6 +56,30 @@ from tools.budget_config import BudgetConfig, DEFAULT_BUDGET, budget_for_context
 
 logger = logging.getLogger(__name__)
 
+# Tool calls that count as "real work" for the continuous-work enforcement
+# gate: they execute code, mutate files, run commands, navigate a browser,
+# delegate work, send messages, or manage background processes — as opposed
+# to read-only lookups (read_file, search_files, web_search) that prove no
+# progress on their own. A successful non-error call to one of these proves
+# the agent DID something this turn; the turn-end CW gate refuses a bare
+# "done" when none ran and no override is declared.
+_CONTINUOUS_WORK_EVIDENCE_TOOLS = frozenset(
+    {
+        "terminal",
+        "execute_code",
+        "write_file",
+        "patch",
+        "browser_click",
+        "browser_type",
+        "browser_press",
+        "browser_scroll",
+        "browser_navigate",
+        "send_message",
+        "delegate_task",
+        "process_manage",
+    }
+)
+
 
 _pairing_tool_call_id = coalesce_tool_call_id  # canonical id used by the persisted assistant message
 
@@ -998,6 +1022,19 @@ def _commit_tool_result(
                 agent._record_file_mutation_result(function_name, function_args, function_result, is_error)
             except Exception as _ver_err:
                 logging.debug("file-mutation verifier record failed: %s", _ver_err)
+        # Continuous-work evidence: a successful, non-error call to a
+        # work-performing/tool that executes or mutates (as opposed to a
+        # read-only lookup) proves the agent actually DID something this
+        # turn. The turn-end CW gate uses this to refuse a bare "done".
+        if (
+            not blocked
+            and not is_error
+            and hasattr(agent, "_continuous_work_evidence_tools")
+            and function_name in _CONTINUOUS_WORK_EVIDENCE_TOOLS
+        ):
+            agent._continuous_work_evidence_tools = (
+                getattr(agent, "_continuous_work_evidence_tools", 0) + 1
+            )
         if agent.verbose_logging:
             logging.debug("Tool %s completed in %.2fs", function_name, tool_duration)
             _log_result = verbose_text(function_result)
@@ -1446,20 +1483,6 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
 
 
 # ── Sequential dispatch ─────────────────────────────────────────────────────
-
-
-def _start_quiet_tool_spinner(agent, function_name: str, function_args: dict, *, gate: bool = True, label: Optional[str] = None):
-    """Start the quiet-mode kawaii spinner for one tool call, or return None; ``gate=False``
-    skips ``_should_start_quiet_spinner`` (context-engine tools always spin)."""
-    if not agent._should_emit_quiet_tool_messages() or (gate and not agent._should_start_quiet_spinner()):
-        return None
-    face = random.choice(KawaiiSpinner.get_waiting_faces())
-    if label is None:
-        display_args = _redact_tool_args_for_display(function_name, function_args) or function_args
-        label = f"{_get_tool_emoji(function_name)} {_build_tool_label(function_name, display_args) or function_name}"
-    spinner = KawaiiSpinner(f"{face} {label}", spinner_type='dots', print_fn=agent._print_fn)
-    spinner.start()
-    return spinner
 
 
 def _finish_quiet_tool_spinner(agent, spinner, function_name: str, function_args: dict, tool_duration: float, result) -> None:

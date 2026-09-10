@@ -1070,7 +1070,9 @@ export const ja = defineLocale({
         mcp: { label: 'MCP', hint: 'MCP ツールルーティング' },
         title_generation: { label: 'タイトル生成', hint: 'セッションタイトル' },
         review: { label: 'レビュー', hint: '/review レビューサブエージェント' },
-        curator: { label: 'キュレーター', hint: 'スキル使用レビュー' }
+        curator: { label: 'キュレーター', hint: 'スキル使用レビュー' },
+        subagent: { label: 'サブエージェント (delegate_task)', hint: '子エージェントのモデル' },
+        prompt_enhance: { label: 'プロンプト強化', hint: 'ユーザープロンプトを書き換え' }
       }
     },
     localModels: {
@@ -2292,6 +2294,14 @@ export const ja = defineLocale({
     transcribingDictation: '口述を文字起こし中',
     voiceControls: '音声',
     voiceDictation: '音声口述',
+    enhance: 'プロンプトを強化',
+    enhancing: '強化中...',
+    enhanceFailed: '強化に失敗',
+    enhanceRateLimited: '早すぎます — 数秒待ってから再試行してください',
+    enhanceTooLong: 'プロンプトが長すぎます',
+    continuousWork: '連続作業',
+    continuousWorkActive: '連続作業モード — すべてのタスクが完了するまでエージェントが作業を続けます',
+    continuousWorkOff: '連続作業モード オフ',
     speakReplies: '返信を読み上げる',
     stopSpeakingReplies: '返信の読み上げを停止',
     wakeWordListening: phrase => `ウェイクワード:「${phrase}」— 待機中`,
@@ -2386,6 +2396,21 @@ export const ja = defineLocale({
         text: 'これがどのように機能するか説明し、主要なファイルを教えてください。'
       }
     }
+  },
+
+  usage: {
+    costLabel: 'セッション費用',
+    inputTokens: '入力トークン',
+    outputTokens: '出力トークン',
+    cacheReadTokens: 'キャッシュ読み取り',
+    cacheHitRate: 'キャッシュヒット率',
+    reasoningTokens: '推論トークン',
+    estimatedCost: '推定費用',
+    actualCost: '実際の費用',
+    costPerHour: '時間あたりのコスト',
+    tokensPerSecond: '秒あたりのトークン数',
+    elapsed: '経過時間',
+    calls: 'API 呼び出し'
   },
 
   statusStack: {
@@ -3380,6 +3405,9 @@ export const ja = defineLocale({
     yoloSystem: active => `このセッションの YOLO ${active ? 'オン' : 'オフ'}`,
     yoloTitle: 'YOLO',
     yoloToggleFailed: 'YOLO を切り替えられませんでした',
+    cwOn: '連続作業モード ON — 敵対的批評家がすべての作業を確認してから停止を許可します',
+    cwOff: '連続作業モード OFF',
+    cwSystem: active => `連続作業モード${active ? 'が有効になりました。敵対的批評家がすべての作業を確認してからエージェントの停止を許可します。' : 'が無効になりました。'}`,
     profileStatus: current =>
       `プロファイル: ${current}。/profile <name> または「新しいセッション」ピッカーを使って別のプロファイルでチャットを始めてください。`,
     unknownProfile: '不明なプロファイル',

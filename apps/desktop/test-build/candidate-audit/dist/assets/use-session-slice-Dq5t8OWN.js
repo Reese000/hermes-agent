@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-C_s2cVnS.js";import{a as t}from"./vendor-react-R-OdkZd7.js";var n=e(t(),1),r=[];function i(e,t){return(0,n.useSyncExternalStore)(t=>e.listen(t),()=>t?e.get()[t]??r:r)}function a(e,t){let r=(0,n.useRef)(t);r.current=t;let i=(0,n.useCallback)(t=>e.listen(t),[e]);return(0,n.useSyncExternalStore)(i,()=>r.current(e.get()))}export{a as n,i as t};

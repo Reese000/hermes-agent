@@ -1,12 +1,13 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
-import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef } from 'react'
+import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useTourMarker } from '@/app/chat/tour-marker'
 import { useHudComposerDrag } from '@/app/hud/composer-drag'
 import { composerFill, composerFloatingStrip, composerSurfaceGlass } from '@/components/chat/composer-dock'
 import { Button } from '@/components/ui/button'
 import { Slot as ContribSlot } from '@/contrib/react/slot'
+import { enhancePromptStream } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { chatMessageText } from '@/lib/chat-messages'
 import { PR_COMMENT_URL_RE } from '@/lib/chat-runtime'
@@ -21,10 +22,14 @@ import { browseBackward, browseForward, deriveUserHistory, isBrowsingHistory } f
 import { POPOUT_WIDTH_REM } from '@/store/composer-popout'
 import { parkQueuedPrompts, removeQueuedPrompt, unparkQueuedPrompts } from '@/store/composer-queue'
 import { $hudMode } from '@/store/hud'
+import { notify } from '@/store/notifications'
 import { sessionBlockingPrompt } from '@/store/prompts'
 import { toggleReview } from '@/store/review'
 import { $gatewayState } from '@/store/session'
 import { $botChatSessionIds, $sessionStates, $sessionTiles, isBotChatSession } from '@/store/session-states'
+import { fetchSessionUsage } from '@/store/session-usage'
+import { $usageIntervalMs } from '@/store/usage-indicator'
+import { $enhanceProfile } from '@/store/enhance-settings'
 import { $threadScrolledUp } from '@/store/thread-scroll'
 import { $autoSpeakReplies } from '@/store/voice-prefs'
 import { useTheme } from '@/themes'
@@ -85,7 +90,41 @@ import type { ChatBarProps } from './types'
 import { isRedoShortcut, isUndoShortcut } from './undo-history'
 import { UrlDialog } from './url-dialog'
 import { chipTypedUrlOnSpace, linkifyUrls } from './url-refs'
+import { UsageIndicator } from './usage-indicator'
 import { VoiceActivity, VoicePlaybackActivity } from './voice-activity'
+
+/** Strip common LLM wrapper text from enhance output. */
+function sanitizeEnhancedOutput(enhanced: string, original: string): string {
+  let text = enhanced.trim()
+  if (!text) return original
+
+  // Strip code fences
+  if (text.startsWith('```') && text.endsWith('```')) {
+    text = text.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim()
+  }
+
+  // Strip wrapper prefixes
+  const wrappers = [
+    /^(?:here(?:'s| is) (?:the )?(?:enhanced|refined|improved|rewritten)(?:\s+prompt)?\s*[:\-]\s*)/i,
+    /^(?:enhanced(?:\s+prompt)?\s*[:\-]\s*)/i,
+    /^(?:refined(?:\s+prompt)?\s*[:\-]\s*)/i,
+    /^(?:improved(?:\s+prompt)?\s*[:\-]\s*)/i,
+    /^(?:rewritten(?:\s+prompt)?\s*[:\-]\s*)/i,
+  ]
+  for (const pat of wrappers) {
+    text = text.replace(pat, '').trim()
+  }
+
+  // Strip surrounding quotes
+  if (text.length > 2) {
+    if ((text.startsWith('"') && text.endsWith('"')) ||
+        (text.startsWith('\u201c') && text.endsWith('\u201d'))) {
+      text = text.slice(1, -1).trim()
+    }
+  }
+
+  return text || original
+}
 
 export function ChatBar({
   busy,
@@ -112,6 +151,7 @@ export function ChatBar({
   onTranscribeAudio
 }: ChatBarProps) {
   const hudMode = useStore($hudMode)
+  const enhanceProfile = useStore($enhanceProfile)
   const hudWindowing = window.hermesDesktop?.hud?.windowing
   const hudNativeDrag = hudMode && hudWindowing?.nativeDrag === true
 
@@ -190,6 +230,31 @@ export function ChatBar({
   // renders them as the pill strip at the top of the overlay lane.
   useComposerMicroActions(statusSessionId, busy)
 
+  // $sessionUsageBySession (and the backend's /usage endpoint) are keyed by
+  // STORED session id, but `sessionId` here is the RUNTIME id (see the
+  // statusSessionId comment above) — they diverge for any resumed/persisted
+  // session. Resolve before hitting the endpoint, same fallback as the
+  // background-status bridge above: pre-persistence, runtime id IS the key.
+  const usageSessionId = sessionId
+    ? ($sessionStates.get()[sessionId]?.storedSessionId ?? sessionId)
+    : null
+
+  // Poll session usage data: fetch once on sessionId change, then at the
+  // configured cadence while busy. UsageIndicator's cost/hr and tokens/sec
+  // are a rolling average over these polls (see session-usage.ts), so the
+  // cadence here directly sets how responsive that "current pace" reading is.
+  const usageIntervalMs = useStore($usageIntervalMs)
+
+  useEffect(() => {
+    if (!usageSessionId) {return}
+    void fetchSessionUsage(usageSessionId)
+
+    if (!busy) {return}
+    const interval = setInterval(() => void fetchSessionUsage(usageSessionId), usageIntervalMs)
+
+    return () => clearInterval(interval)
+  }, [usageSessionId, busy, usageIntervalMs])
+
   const composerRef = useRef<HTMLFormElement | null>(null)
   // The dock wraps the strips + status stack + composer; the thread's bottom
   // clearance measures this, while the pop-out drag still tracks the composer.
@@ -213,6 +278,7 @@ export function ChatBar({
   // engine writes it — an explicit shared handle, not a back-reference.
   const queueEditRef = useRef<QueueEditState | null>(null)
   const composingRef = useRef(false) // true during IME composition (CJK input)
+  const [enhancing, setEnhancing] = useState(false)
 
   const { availableThemes, themeName } = useTheme()
   const at = useAtCompletions({ gateway: gateway ?? null, sessionId: sessionId ?? null, cwd: cwd ?? null })
@@ -333,6 +399,147 @@ export function ChatBar({
 
     return onCancel()
   }, [activeQueueSessionKeyRef, onCancel])
+
+  // Enhance state: abort controller + original text for cancel/restore
+  const enhanceAbortRef = useRef<AbortController | null>(null)
+  const enhanceOriginalTextRef = useRef<string>('')
+  const enhanceLastOutputRef = useRef<string>('')
+
+  const handleEnhance = useCallback(async () => {
+    const text = draftRef.current
+
+    // Prevent double-enhance: if current text matches last enhance output,
+    // skip to avoid drifting the prompt further from original intent.
+    if (text.trim() && text.trim() === enhanceLastOutputRef.current.trim()) {
+      notify({
+        kind: 'info',
+        title: t.composer.enhance,
+        message: 'Already enhanced — undo first to re-enhance with different settings',
+      })
+      return
+    }
+
+    // Bank current text so Ctrl+Z can restore it after enhancement.
+    if (text.trim()) {
+      recordUndoPoint()
+    }
+
+    // Store original text for cancel restoration
+    enhanceOriginalTextRef.current = text
+
+    // Create abort controller for cancellation
+    const controller = new AbortController()
+    enhanceAbortRef.current = controller
+
+    setEnhancing(true)
+
+    // Show "thinking..." immediately so the user knows generation started,
+    // even before the first streaming chunk arrives (which can take 5-20s
+    // while context is gathered and the LLM connection is established).
+    loadIntoComposer('…', attachments)
+
+    try {
+      // ── Streaming enhance with render throttle ─────────────────────
+      // Chunks arrive from the backend in real-time. We buffer them and
+      // flush to the DOM at ~30fps via requestAnimationFrame so the user
+      // sees text appearing progressively as the LLM generates.
+      let enhanced = ''
+      let pending = ''
+      let rafId: number | null = null
+      let flushResolve: (() => void) | null = null
+
+      const flushPending = () => {
+        rafId = null
+        if (pending) {
+          enhanced += pending
+          pending = ''
+          loadIntoComposer(enhanced, attachments)
+        }
+        flushResolve?.()
+        flushResolve = null
+      }
+
+      for await (const chunk of enhancePromptStream(text, sessionId, enhanceProfile, controller.signal)) {
+        if (sessionIdRef.current !== sessionId) {
+          if (rafId != null) cancelAnimationFrame(rafId)
+          return
+        }
+        pending += chunk
+        // Schedule a rAF to flush accumulated text to the DOM.
+        // Multiple chunks within one frame accumulate in `pending`
+        // and get flushed together at ~30fps.
+        if (rafId == null) {
+          rafId = requestAnimationFrame(flushPending)
+        }
+        // Yield so the rAF callback can fire between chunks
+        await new Promise<void>(r => { flushResolve = r })
+      }
+
+      // Final flush — ensure the complete text is rendered
+      if (rafId != null) cancelAnimationFrame(rafId)
+      flushPending()
+
+      // Sanitize streaming output — strip wrapper text the LLM might add
+      enhanced = sanitizeEnhancedOutput(enhanced, text)
+
+      if (!enhanced || enhanced === text) {
+        // For syntax mode, returning the same text is valid (no errors found)
+        // Only show error for non-syntax profiles where we expect changes
+        if (enhanceProfile !== 'syntax') {
+          notify({
+            kind: 'error',
+            title: t.composer.enhanceFailed,
+            message: t.composer.enhanceFailed,
+          })
+        }
+        enhanceLastOutputRef.current = text
+      } else {
+        enhanceLastOutputRef.current = enhanced
+        // Re-load sanitized text if it changed during sanitization
+        loadIntoComposer(enhanced, attachments)
+      }
+    } catch (err) {
+      if (sessionIdRef.current !== sessionId) {
+        return
+      }
+
+      // Handle abort (cancel) — restore original text
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        loadIntoComposer(enhanceOriginalTextRef.current, attachments)
+        return
+      }
+
+      // On any error, restore original text (not partial streaming output)
+      loadIntoComposer(enhanceOriginalTextRef.current, attachments)
+
+      const msg = err instanceof Error ? err.message : String(err)
+      // Map known error types to user-friendly messages
+      const detail = msg.includes('rate_limited')
+        ? t.composer.enhanceRateLimited
+        : msg.includes('text_too_long')
+          ? t.composer.enhanceTooLong
+          : msg.includes('timeout')
+            ? 'Request timed out — try a shorter prompt'
+            : msg.includes('Failed to fetch')
+              ? 'Cannot reach the backend — is Hermes running?'
+              : msg || t.composer.enhanceFailed
+
+      notify({
+        kind: 'error',
+        title: t.composer.enhanceFailed,
+        message: detail,
+      })
+    } finally {
+      enhanceAbortRef.current = null
+      setEnhancing(false)
+    }
+  }, [attachments, draftRef, enhanceProfile, loadIntoComposer, recordUndoPoint, sessionId, sessionIdRef, t])
+
+  const handleCancelEnhance = useCallback(() => {
+    enhanceAbortRef.current?.abort()
+    enhanceAbortRef.current = null
+    setEnhancing(false)
+  }, [])
 
   const { compactPill, foldVoice, minimal, stacked } = useComposerMetrics({
     composerDockRef,
@@ -1024,10 +1231,13 @@ export function ChatBar({
         status: conversation.status
       }}
       disabled={disabled}
+      enhancing={enhancing}
       foldVoice={foldVoice}
       hasComposerPayload={hasComposerPayload}
       minimal={minimal}
+      onCancelEnhance={handleCancelEnhance}
       onDictate={dictate}
+      onEnhance={handleEnhance}
       onQueue={queueDraft}
       onToggleAutoSpeak={handleToggleAutoSpeak}
       state={state}
@@ -1187,6 +1397,7 @@ export function ChatBar({
               5px transparent grab margin — so both strips carry the same inset
               and share one left edge with it. */}
           <div className={cn(composerFloatingStrip, 'px-[5px] pb-1.5 empty:hidden')}>
+            <UsageIndicator busy={busy} sessionId={usageSessionId} />
             <ActionBadges sessionId={statusSessionId} />
             <SuggestionPills sessionId={statusSessionId} />
           </div>

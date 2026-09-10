@@ -127,3 +127,112 @@ export function setModelAssignment(
     body
   })
 }
+
+export function searchProviderModels(provider: string, query: string): Promise<{ models: string[] }> {
+  return window.hermesDesktop.api<{ models: string[] }>({
+    ...profileScoped(),
+    path: `/api/model/search?${new URLSearchParams({ q: query, provider }).toString()}`
+  })
+}
+
+export interface EnhancePromptResponse {
+  enhanced: string
+  ok: boolean
+  error?: string
+}
+
+export function enhancePrompt(
+  text: string,
+  sessionId?: string | null,
+  profile?: string | null
+): Promise<EnhancePromptResponse> {
+  return window.hermesDesktop.api<EnhancePromptResponse>({
+    ...profileScoped(),
+    path: '/api/model/enhance-prompt',
+    method: 'POST',
+    body: { prompt: text, session_id: sessionId || undefined, profile: profile || undefined },
+    timeoutMs: 300_000
+  })
+}
+
+/** Streaming version of enhancePrompt — yields text chunks as the LLM generates. */
+export async function* enhancePromptStream(
+  text: string,
+  sessionId?: string | null,
+  profile?: string | null,
+  signal?: AbortSignal
+): AsyncGenerator<string, void, unknown> {
+  if (!window.hermesDesktop?.apiStream) {
+    const res = await enhancePrompt(text, sessionId, profile)
+    if (res.ok && res.enhanced) {
+      yield res.enhanced
+    }
+    return
+  }
+
+  const chunks: string[] = []
+  let resolve: (() => void) | null = null
+  let done = false
+  let donePayload: { ok: boolean; error?: string } | null = null
+
+  const { dispose } = window.hermesDesktop.apiStream(
+    {
+      ...profileScoped(),
+      path: '/api/model/enhance-prompt-stream',
+      method: 'POST',
+      body: { prompt: text, session_id: sessionId || undefined, profile: profile || undefined },
+      timeoutMs: 300_000
+    },
+    {
+      onChunk: (payload: { data: string }) => {
+        if (payload.data === '[DONE]') {
+          done = true
+          donePayload = { ok: true }
+          resolve?.()
+          return
+        }
+        try {
+          const parsed = JSON.parse(payload.data)
+          if (parsed.error) {
+            done = true
+            donePayload = { ok: false, error: parsed.error }
+            resolve?.()
+            return
+          }
+          if (parsed.text) {
+            chunks.push(parsed.text)
+            resolve?.()
+          }
+        } catch {
+          // Non-JSON data line — skip
+        }
+      },
+      onDone: (payload: { ok: boolean; error?: string }) => {
+        done = true
+        donePayload = payload
+        resolve?.()
+      }
+    }
+  )
+
+  const abortHandler = () => {
+    done = true
+    resolve?.()
+  }
+  signal?.addEventListener('abort', abortHandler)
+
+  try {
+    while (!done) {
+      await new Promise<void>(r => { resolve = r })
+      while (chunks.length > 0) {
+        yield chunks.shift()!
+      }
+    }
+    if (donePayload && !(donePayload as { ok: boolean }).ok) {
+      throw new Error((donePayload as { error?: string }).error || 'Enhance failed')
+    }
+  } finally {
+    signal?.removeEventListener('abort', abortHandler)
+    dispose()
+  }
+}

@@ -563,6 +563,10 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 4090, str(limit_message), {"reason": reason} if reason else None)
     # Rewritten every submit: a session alternates app window / HUD; stale "hud" misinforms.
     session["client_surface"] = "hud" if params.get("surface") == "hud" else ""
+    # Per-conversation continuous-work flag. Read from every submit so a chat
+    # can enable it mid-session (the flag rides each turn; the note is computed
+    # fresh per turn from this session field, never from cached config).
+    session["continuous_work"] = bool(params.get("continuous_work"))
     has_truncation = any(params.get(k) is not None for k in _TRUNCATION_PARAMS)
     if has_truncation and isinstance(text, str):
         # A rewind replays what the transcript shows: re-expand a skill invocation or

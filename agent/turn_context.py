@@ -711,31 +711,17 @@ def _collect_pre_llm_call_context(
     return ""
 
 
-def _merge_gateway_notes(
-    agent: Any, messages: List[Any], current_turn_user_idx: int, plugin_user_context: str
-) -> str:
-    """Must-deliver per-turn notes ride the user-message injection channel (one-shot) so the
-    ephemeral system prompt stays byte-stable: the gateway's staged notes, then the
-    surface-switch correction. Multimodal (list) content can't take the string sidecar —
-    append a durable text part instead."""
-    _turn_notes = "\n\n".join(
-        part for part in (consume_gateway_turn_context_notes(agent),
-                          consume_surface_switch_note(agent)) if part
-    )
-    if not _turn_notes:
-        return plugin_user_context
-    _gw_turn_content = (
-        messages[current_turn_user_idx].get("content")
-        if 0 <= current_turn_user_idx < len(messages)
-        and isinstance(messages[current_turn_user_idx], dict)
-        else None
-    )
-    if isinstance(_gw_turn_content, list):
-        append_notes_to_multimodal_content(_gw_turn_content, _turn_notes)
-        return plugin_user_context
-    return (
-        plugin_user_context + "\n\n" + _turn_notes if plugin_user_context else _turn_notes
-    )
+    # Per-turn file-mutation verifier state.
+    agent._turn_failed_file_mutations = {}
+    agent._turn_file_mutation_paths = set()
+    agent._verification_stop_nudges = 0
+    agent._pre_verify_nudges = 0
+    # Per-turn continuous-work enforcement: how many work-evidence tool calls
+    # (mutating/verifying tools) actually executed this turn. The turn-end CW
+    # gate refuses a bare "done" when this is 0 and no override is declared.
+    agent._continuous_work_evidence_tools = 0
+    # Bounded re-injection budget for the CW enforcement gate.
+    agent._continuous_work_nudges = 0
 
 
 def _bind_interrupt_scope(agent: Any, ra) -> None:

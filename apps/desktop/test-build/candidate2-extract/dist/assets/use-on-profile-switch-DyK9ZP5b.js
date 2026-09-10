@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-C_s2cVnS.js";import{r as t}from"./i18n-C0cyFqsQ.js";import{a as n}from"./vendor-react-R-OdkZd7.js";import{t as r}from"./profile-DZPsclcP.js";var i=e(n(),1);function a(e){let n=t(r),a=(0,i.useRef)(!0);(0,i.useEffect)(()=>{if(a.current){a.current=!1;return}e()},[n])}export{a as t};

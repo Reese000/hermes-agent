@@ -15,7 +15,9 @@ import {
   resolveDesktopCommand
 } from '@/lib/desktop-slash-commands'
 import { isMissingRpcMethod } from '@/lib/gateway-rpc'
+import { setContinuousWork } from '@/api/config'
 import { setSessionYolo } from '@/lib/yolo-session'
+import { $continuousWorkBySession, toggleContinuousWorkForSession } from '@/store/continuous-work'
 import { openCommandPalettePage } from '@/store/command-palette'
 import { setComposerDraft } from '@/store/composer'
 import { applyGoalStatusText } from '@/store/goals'
@@ -787,6 +789,33 @@ export function useSlashCommand(deps: SlashCommandDeps) {
             appendSessionTextMessage(sid, 'system', copy.yoloSystem(active))
           } catch {
             notify({ kind: 'error', title: copy.yoloTitle, message: copy.yoloToggleFailed })
+          }
+        },
+        // /cw toggles Continuous Work mode — adversarial quality enforcement.
+        // Per-session: each chat has its own flag, same as the statusbar toggle.
+        // Must also call RPC + config persistence to keep backend in sync.
+        cw: async ({ sessionHint }) => {
+          const sid = sessionHint || activeSessionIdRef.current
+          const next = toggleContinuousWorkForSession(sid)
+
+          notify({
+            kind: 'success',
+            message: next ? copy.cwOn : copy.cwOff
+          })
+
+          if (sid) {
+            appendSessionTextMessage(
+              sid,
+              'system',
+              copy.cwSystem(next)
+            )
+            // Propagate to running agent mid-turn via WebSocket RPC
+            requestGateway('session.set_continuous_work', {
+              session_id: sid,
+              enabled: next
+            }).catch(() => { /* ignore — agent may not be running */ })
+            // Persist to config.yaml so headless agents inherit CW
+            void setContinuousWork(next).catch(() => { /* non-fatal */ })
           }
         },
         // /wake must stay in the gateway process that owns the Desktop wake

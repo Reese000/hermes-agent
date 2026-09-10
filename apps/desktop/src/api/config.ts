@@ -118,6 +118,24 @@ export function getEnvVars(profile?: null | string): Promise<Record<string, EnvV
   })
 }
 
+/** Read the Continuous Work toggle (config.yaml agent.continuous_work). */
+export function getContinuousWork(): Promise<{ continuous_work: boolean }> {
+  return hermesApi<{ continuous_work: boolean }>({
+    ...profileScoped(),
+    path: '/api/agent/continuous-work'
+  })
+}
+
+/** Write the Continuous Work toggle to the profile's config.yaml. */
+export function setContinuousWork(enabled: boolean): Promise<{ continuous_work: boolean }> {
+  return hermesApi<{ continuous_work: boolean }>({
+    ...profileScoped(),
+    path: '/api/agent/continuous-work',
+    method: 'POST',
+    body: { enabled }
+  })
+}
+
 export function setEnvVar(key: string, value: string, profile?: ProfileScope): Promise<{ ok: boolean }> {
   return window.hermesDesktop.api<{ ok: boolean }>({
     ...capabilityScoped(profile),

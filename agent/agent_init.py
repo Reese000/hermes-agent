@@ -1179,6 +1179,19 @@ def _apply_display_config(agent, _agent_cfg, platform):
             _model_section.get("lmstudio_load_mode"),
         )
 
+    # Continuous Work mode -- read early (before the guardrail controller is
+    # built) so the tightened warn_after thresholds can be applied. Default
+    # False; toggled from the desktop composer and persisted to config.yaml.
+    # Also consumed by agent/system_prompt.py to inject the guidance suffix.
+    _agent_section_cw = _agent_cfg.get("agent", {})
+    if not isinstance(_agent_section_cw, dict):
+        _agent_section_cw = {}
+    agent._continuous_work = bool(
+        _agent_section_cw.get("continuous_work", False)
+        or _agent_section_cw.get("continuous_work_default", False)
+    )
+    agent._cw_critic_model = _agent_section_cw.get("continuous_work_critic_model")
+    agent._cw_critic_provider = _agent_section_cw.get("continuous_work_critic_provider")
     # model.streaming=false seeds _disable_streaming (the loop's runtime fallback) for
     # backends with broken streaming tool calls. Session-scoped; orthogonal to display.streaming.
     _streaming = str(_model_section.get("streaming", "true")).strip().lower()
@@ -1192,7 +1205,9 @@ def _apply_display_config(agent, _agent_cfg, platform):
     try:
         agent._tool_guardrails = ToolCallGuardrailController(
             ToolCallGuardrailConfig.from_mapping(
-                _agent_cfg.get("tool_loop_guardrails", {}), platform=platform,
+                _agent_cfg.get("tool_loop_guardrails", {}),
+                continuous_work=agent._continuous_work,
+                platform=platform,
             )
         )
     except Exception as _tlg_err:

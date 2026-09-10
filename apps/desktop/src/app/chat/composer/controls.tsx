@@ -1,15 +1,63 @@
 import { useStore } from '@nanostores/react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Codicon } from '@/components/ui/codicon'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger
+} from '@/components/ui/context-menu'
+// ── Enhance model catalog: separate DropdownMenu ──────────────────────────
+// ModelCatalogMenu renders DropdownMenu* primitives (DropdownMenuItem,
+// DropdownMenuSub, etc.) which REQUIRE a DropdownMenu context. It cannot be
+// nested inside a ContextMenuSubContent — Radix throws
+// "MenuItem must be used within Menu" because ContextMenu and DropdownMenu
+// have separate, incompatible provider trees. The solution: a standalone
+// DropdownMenu with its own hidden trigger (<span className="sr-only" />),
+// controlled via `modelMenuOpen` state. The context menu's "Model:" row
+// opens it via onSelect + onPointerEnter. The sr-only trigger gives Radix
+// a DOM element to anchor the dropdown to (without it, the dropdown defaults
+// to the screen corner). Positioning is side="top" align="start" so it
+// appears above the composer controls, near the enhance button.
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
-import { AudioLines, Ear, EarOff, iconSize, Layers3, Loader2, Square, Volume2, VolumeX } from '@/lib/icons'
+import {
+  AudioLines,
+  Ear,
+  EarOff,
+  iconSize,
+  Layers3,
+  Loader2,
+  Sparkles,
+  Square,
+  SteeringWheel,
+  Volume2,
+  VolumeX
+} from '@/lib/icons'
+import { displayModelName } from '@/lib/model-status-label'
+import { reasoningEffortLabel, type ReasoningEffort } from '@/lib/reasoning-effort'
 import { cn } from '@/lib/utils'
+import {
+  $enhanceEnabled,
+  $enhanceModel,
+  $enhanceProfile,
+  $enhanceProvider,
+  $enhanceReasoning,
+  ENHANCE_PROFILES
+} from '@/store/enhance-settings'
 import { $hudMode, closeHud, resetHudLayout } from '@/store/hud'
 import { $wakeWord, toggleWakeWord } from '@/store/wake-word'
 
+import { ModelCatalogMenu, ModelMenuCloseContext, type ModelMenuController } from '@/app/shell/model-catalog-menu'
 import { ACTIVE_ICON_BTN, GHOST_ICON_BTN, PRIMARY_ICON_BTN } from './control-classes'
 import type { ConversationStatus } from './hooks/use-voice-conversation'
 import { ModelPill } from './model-pill'
@@ -39,9 +87,12 @@ export function ComposerControls({
   compactModelPill = false,
   conversation,
   disabled,
+  enhancing = false,
   foldVoice = false,
   hasComposerPayload,
   minimal = false,
+  onCancelEnhance,
+  onEnhance,
   state,
   voiceStatus,
   onDictate,
@@ -55,9 +106,12 @@ export function ComposerControls({
   compactModelPill?: boolean
   conversation: ConversationProps
   disabled: boolean
+  enhancing?: boolean
   foldVoice?: boolean
   hasComposerPayload: boolean
   minimal?: boolean
+  onCancelEnhance?: () => void
+  onEnhance?: () => void
   state: ChatBarState
   voiceStatus: VoiceStatus
   onDictate: () => void
@@ -68,6 +122,41 @@ export function ComposerControls({
   const c = t.composer
   const hudMode = useStore($hudMode)
 
+  const enhanceEnabled = useStore($enhanceEnabled)
+  const enhanceModel = useStore($enhanceModel)
+  const enhanceProvider = useStore($enhanceProvider)
+  const enhanceReasoning = useStore($enhanceReasoning)
+  const enhanceProfile = useStore($enhanceProfile)
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+
+  // ── Enhance model controller ───────────────────────────────────────────
+  // Adapts ModelMenuController (designed for session-state model selection)
+  // to the enhance settings atoms. ModelCatalogMenu reads `current` for the
+  // active checkmark, calls `select()` on row click, and `setOptions()` for
+  // per-row reasoning/fast edits via hover submenus. `applyPreset` and
+  // `presetFor` are no-ops because enhance doesn't persist per-model presets
+  // — it stores a single global reasoning level in $enhanceReasoning.
+  const enhanceController: ModelMenuController = useMemo(() => ({
+    applyPreset: () => {},
+    current: {
+      effort: enhanceReasoning,
+      fast: false,
+      model: enhanceModel,
+      provider: enhanceProvider,
+    },
+    presetFor: () => ({ effort: enhanceReasoning }),
+    select: (model: string, provider: string) => {
+      $enhanceModel.set(model)
+      $enhanceProvider.set(provider)
+      setModelMenuOpen(false)
+    },
+    setOptions: (patch) => {
+      if (patch.effort !== undefined) {
+        $enhanceReasoning.set(patch.effort as ReasoningEffort)
+      }
+    },
+  }), [enhanceModel, enhanceProvider, enhanceReasoning])
+
   if (conversation.active) {
     return <ConversationPill {...conversation} disabled={disabled} />
   }
@@ -77,12 +166,7 @@ export function ComposerControls({
   // only when the composer is empty and a turn is running.
   const showStop = busy && !hasComposerPayload
   const showQueueButton = busyAction !== 'stop' && hasComposerPayload
-  // The HUD is a Spotlight bar a few hundred pixels wide, so the four separate
-  // voice toggles fold into one menu there and leave the row to the input. A
-  // narrow tile hits the same wall from the other direction and folds for the
-  // same reason — same controls, same state, different budget. Below that
-  // even the menu goes: at `minimal` the row is the send button and nothing
-  // else, which is the one thing that must survive every width.
+  const busyLabel = busyAction === 'queue' ? c.queueMessage : busyAction === 'steer' ? c.steer : c.stop
   const foldedVoice = hudMode || foldVoice
 
   const voiceControls = foldedVoice ? (
@@ -105,6 +189,78 @@ export function ComposerControls({
 
   return (
     <div className="ml-auto flex min-w-0 shrink items-center gap-(--composer-control-gap)">
+      {onEnhance && enhanceEnabled ? (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="contents">
+              <Tip label={enhancing ? c.enhancing : (
+                <>
+                  <span className="!block font-medium">{c.enhance}</span>
+                  <span className="!block text-[10px] opacity-70">{ENHANCE_PROFILES[enhanceProfile]?.label || enhanceProfile} · {displayModelName(enhanceModel)} · {reasoningEffortLabel(enhanceReasoning)}</span>
+                  <span className="!block mt-0.5 text-[8px] italic opacity-40">right-click to configure</span>
+                </>
+              )} className="max-w-52">
+                <Button
+                  aria-label={enhancing ? c.enhancing : c.enhance}
+                  className={cn(GHOST_ICON_BTN, 'p-0')}
+                  disabled={disabled}
+                  onClick={enhancing ? onCancelEnhance : onEnhance}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  {enhancing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className={iconSize.sm} />}
+                </Button>
+              </Tip>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-64">
+            <ContextMenuItem onSelect={() => $enhanceEnabled.set(false)}>
+              <Codicon name="eye-closed" size="0.875rem" className="mr-2" />
+              Hide enhance button
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Codicon name="list-filter" size="0.875rem" className="mr-2" />
+                Profile: {ENHANCE_PROFILES[enhanceProfile]?.label || enhanceProfile}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-48">
+                {Object.entries(ENHANCE_PROFILES).map(([key, profile]) => (
+                  <ContextMenuItem key={key} onSelect={() => $enhanceProfile.set(key)}>
+                    <Checkbox checked={key === enhanceProfile} className="mr-2 size-3" />
+                    <span className="min-w-0 flex-1">
+                      {profile.label}
+                      <span className="ml-1 text-[0.625rem] text-muted-foreground">{profile.description}</span>
+                    </span>
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+            <ContextMenuItem
+              onSelect={() => setModelMenuOpen(true)}
+              onPointerEnter={() => setModelMenuOpen(true)}
+            >
+              <Codicon name="settings-gear" size="0.875rem" className="mr-2" />
+              <span className="min-w-0 flex-1 truncate">Model: {displayModelName(enhanceModel)}</span>
+              <Codicon name="chevron-right" size="0.75rem" className="ml-auto opacity-50" />
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : null}
+      <DropdownMenu open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <span className="sr-only" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64 p-0" side="top" sideOffset={8}>
+          <ModelMenuCloseContext.Provider value={() => setModelMenuOpen(false)}>
+            <ModelCatalogMenu
+              controller={enhanceController}
+              includeMoa={false}
+            />
+          </ModelMenuCloseContext.Provider>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {minimal ? null : (
         <>
           <ModelPill compact={compactModelPill} disabled={disabled} model={state.model} />
@@ -145,21 +301,36 @@ export function ComposerControls({
       ) : (
         <Tip
           label={
-            showStop ? (
-              <TipKeybindLabel actionId="composer.send" text={c.stop} />
+            busy ? (
+              <TipKeybindLabel
+                actionId={
+                  busyAction === 'steer'
+                    ? 'composer.steer'
+                    : busyAction === 'queue'
+                      ? 'composer.queue'
+                      : 'composer.send'
+                }
+                text={busyLabel}
+              />
             ) : (
               <TipKeybindLabel actionId="composer.send" text={c.send} />
             )
           }
         >
           <Button
-            aria-label={showStop ? c.stop : c.send}
+            aria-label={busy ? busyLabel : c.send}
             className={PRIMARY_ICON_BTN}
             disabled={disabled || !canSubmit}
             type="submit"
           >
-            {showStop ? (
-              <span className="block size-2.5 rounded-[0.1875rem] bg-current" />
+            {busy ? (
+              busyAction === 'queue' ? (
+                <Layers3 className={iconSize.sm} />
+              ) : busyAction === 'steer' ? (
+                <SteeringWheel className={iconSize.sm} />
+              ) : (
+                <span className="block size-2.5 rounded-[0.1875rem] bg-current" />
+              )
             ) : (
               <Codicon name="arrow-up" size="0.875rem" />
             )}

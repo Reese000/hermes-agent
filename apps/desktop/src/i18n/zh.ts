@@ -1357,7 +1357,9 @@ export const zh: Translations = {
         mcp: { label: 'MCP', hint: 'MCP 工具路由' },
         title_generation: { label: '标题生成', hint: '会话标题' },
         review: { label: '评审', hint: '/review 评审子智能体' },
-        curator: { label: '维护器', hint: '技能使用审查' }
+        curator: { label: '维护器', hint: '技能使用审查' },
+        subagent: { label: '子代理 (delegate_task)', hint: '子代理使用的模型' },
+        prompt_enhance: { label: '提示增强', hint: '重写用户提示' }
       }
     },
     localModels: {
@@ -2818,6 +2820,14 @@ export const zh: Translations = {
     transcribingDictation: '正在转写听写',
     voiceControls: '语音',
     voiceDictation: '语音听写',
+    enhance: '增强提示',
+    enhancing: '增强中...',
+    enhanceFailed: '增强失败',
+    enhanceRateLimited: '操作过快 — 请等待几秒后重试',
+    enhanceTooLong: '提示词过长，无法增强',
+    continuousWork: '连续工作',
+    continuousWorkActive: '连续工作模式 — 智能体将持续工作，直到所有任务完成',
+    continuousWorkOff: '连续工作模式已关闭',
     speakReplies: '朗读回复',
     stopSpeakingReplies: '停止朗读回复',
     wakeWordListening: phrase => `唤醒词:"${phrase}" — 正在监听`,
@@ -2948,6 +2958,21 @@ export const zh: Translations = {
         text: '请解释这是如何工作的，并指给我关键文件。'
       }
     }
+  },
+
+  usage: {
+    costLabel: '会话成本',
+    inputTokens: '输入 Token',
+    outputTokens: '输出 Token',
+    cacheReadTokens: '缓存读取',
+    cacheHitRate: '缓存命中率',
+    reasoningTokens: '推理 Token',
+    estimatedCost: '预估成本',
+    actualCost: '实际成本',
+    costPerHour: '每小时成本',
+    tokensPerSecond: '每秒 Token 数',
+    elapsed: '耗时',
+    calls: 'API 调用'
   },
 
   statusStack: {
@@ -3939,6 +3964,9 @@ export const zh: Translations = {
     yoloSystem: active => `此会话 YOLO ${active ? '已开启' : '已关闭'}`,
     yoloTitle: 'YOLO',
     yoloToggleFailed: '无法切换 YOLO',
+    cwOn: '连续工作模式 ON — 对抗性评论员将在允许停止之前审查所有工作',
+    cwOff: '连续工作模式 OFF',
+    cwSystem: active => `连续工作模式${active ? '已启用。对抗性评论员将在允许代理停止之前审查所有工作。' : '已禁用。'}`,
     profileStatus: current => `配置档案：${current}。使用 /profile <name> 或“新建会话”选择器在其他配置档案中开始对话。`,
     unknownProfile: '未知配置档案',
     noProfileNamed: (target, available) => `没有名为“${target}”的配置档案。可用：${available}`,

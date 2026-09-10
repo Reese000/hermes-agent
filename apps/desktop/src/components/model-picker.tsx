@@ -64,6 +64,9 @@ export function ModelPickerDialog({
   // it and do a plain substring filter that preserves array order — matching
   // the `hermes model` CLI picker, which shows the curated list verbatim.
   const [search, setSearch] = useState('')
+  const [liveResults, setLiveResults] = useState<string[]>([])
+  const [liveLoading, setLiveLoading] = useState(false)
+  const [liveError, setLiveError] = useState<string | null>(null)
 
   const modelOptions = useQuery({
     queryKey: modelOptionsQueryKey(profile, sessionId, ownerConnectionId),
@@ -198,6 +201,9 @@ export function ModelPickerDialog({
               currentProvider={optionsProvider || currentProvider}
               downloads={downloads}
               error={error}
+              liveError={liveError}
+              liveLoading={liveLoading}
+              liveResults={liveResults}
               loading={loading}
               loadingModels={loadingModels}
               onSelectModel={selectModel}
@@ -221,6 +227,9 @@ export function ModelPickerDialog({
 }
 
 function ModelResults({
+  liveError,
+  liveLoading,
+  liveResults,
   loading,
   error,
   providers,
@@ -231,6 +240,9 @@ function ModelResults({
   onSelectModel,
   search
 }: {
+  liveError: string | null
+  liveLoading: boolean
+  liveResults: string[]
   loading: boolean
   error: string | null
   providers: ModelOptionProvider[]
@@ -466,6 +478,17 @@ function ModelPrice({ price, isCurrent }: { price?: ModelPricing; isCurrent: boo
       <span>
         {price.input || '?'} / {price.output || '?'}
       </span>
+      {price.cache ? (
+        <span
+          className={cn(
+            'text-[0.6rem]',
+            isCurrent ? 'text-primary-foreground/50' : 'text-muted-foreground/70'
+          )}
+          title={`Cache: ${price.cache}`}
+        >
+          {price.cache}
+        </span>
+      ) : null}
       {onSale ? (
         <span
           className={cn(
