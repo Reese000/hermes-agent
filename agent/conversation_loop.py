@@ -9121,7 +9121,7 @@ def run_conversation(
                 # an adversarial critic review. The critic is a dedicated LLM
                 # call that evaluates the agent's work against 7 quality criteria.
                 # If the critic rejects, the agent is forced to continue with
-                # the critic's feedback. The circuit breaker (3 strikes) prevents
+                # the critic's feedback. The loop detector prevents
                 # infinite reject loops.
                 _cw_nudge = None
                 if getattr(agent, "_continuous_work", False):
@@ -9135,7 +9135,7 @@ def run_conversation(
                             mark_continuous_work_nudge_issued,
                         )
 
-                        # Initialize circuit breaker per-session
+                        # Initialize loop detector per-session
                         if not hasattr(agent, "_cw_loop_detector"):
                             agent._cw_loop_detector = LoopDetector()
 
