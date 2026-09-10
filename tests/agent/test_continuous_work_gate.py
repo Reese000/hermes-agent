@@ -218,7 +218,6 @@ class TestNudgeContent:
 # ─── CW v2: Critic Gate Tests ─────────────────────────────────────────────────
 
 from agent.continuous_work_critic import (
-    CircuitBreaker,
     LoopDetector,
     CriticVerdict,
     TurnEvidence,
@@ -227,41 +226,47 @@ from agent.continuous_work_critic import (
 )
 
 
-class TestCircuitBreaker:
-    def test_never_trips(self):
-        """Circuit breaker is disabled — CW continues until critic approves."""
-        cb = CircuitBreaker(max_strikes=3)
-        for i in range(10):
-            assert cb.record_rejection(f"r{i}") is None
-        assert cb.tripped is False
+class TestLoopDetector:
+    def test_detects_repeated_response(self):
+        """LoopDetector detects when agent produces the same response."""
+        ld = LoopDetector()
+        # Same response 3 times should trigger
+        for _ in range(3):
+            result = ld.check_response_loop("I have completed all the work.")
+        assert result is not None
+        assert "LOOP DETECTED" in result
+        assert "same response" in result
 
-    def test_does_not_fire_after_trip(self):
-        cb = CircuitBreaker(max_strikes=3)
-        cb.record_rejection("r1")
-        cb.record_rejection("r2")
-        cb.record_rejection("r3")  # trips
-        assert cb.record_rejection("r4") is None
-        assert cb.record_rejection("r5") is None
+    def test_no_false_positive_different_responses(self):
+        """LoopDetector does not trigger on varied responses."""
+        ld = LoopDetector()
+        ld.check_response_loop("Step 1 done")
+        ld.check_response_loop("Step 2 done")
+        ld.check_response_loop("Step 3 done")
+        # These are all different — no loop
+        # check_response_loop only records, doesn't block
+        result = ld.check_response_loop("Step 4 done")
+        # Different response, no loop detected
+        assert result is None or "LOOP DETECTED" not in (result or "")
 
-    def test_resets_on_approval(self):
-        cb = CircuitBreaker(max_strikes=3)
-        cb.record_rejection("r1")
-        cb.record_rejection("r2")
-        cb.record_approval()
-        assert cb.strike_count == 0
-        assert cb.tripped is False
-        # Still never trips after reset
-        cb.record_rejection("r1")
-        cb.record_rejection("r2")
-        assert cb.record_rejection("r3") is None
+    def test_detects_repeated_tool_calls(self):
+        """LoopDetector detects when agent repeats same tool calls."""
+        ld = LoopDetector()
+        tc = [{"function": {"name": "terminal", "arguments": "git status"}}]
+        for _ in range(3):
+            result = ld.check_tool_call_loop(tc)
+        assert result is not None
+        assert "LOOP DETECTED" in result
+        assert "same tool calls" in result
 
-    def test_strikes_remaining(self):
-        cb = CircuitBreaker(max_strikes=3)
-        assert cb.strikes_remaining == 3
-        cb.record_rejection("r1")
-        assert cb.strikes_remaining == 3  # never decrements
-        cb.record_rejection("r2")
-        assert cb.strikes_remaining == 3
+    def test_get_repetition_feedback(self):
+        """LoopDetector returns feedback when same rejection repeats."""
+        ld = LoopDetector()
+        ld.record_rejection("violation #1: no work done")
+        ld.record_rejection("violation #1: no work done")
+        ld.record_rejection("violation #1: no work done")
+        feedback = ld.get_repetition_feedback()
+        assert "same feedback" in feedback.lower() or "repeatedly" in feedback.lower()
 
 
 class TestParseCriticResponse:
@@ -708,7 +713,7 @@ class TestCriticGate:
     def test_approve_returns_none(self):
         """When critic approves, gate returns None (allow stop)."""
         from unittest.mock import patch, MagicMock
-        from agent.continuous_work_critic import critic_gate, CircuitBreaker, CriticVerdict
+        from agent.continuous_work_critic import critic_gate, CriticVerdict
 
         agent = MagicMock()
         agent._cw_critic_model = None
@@ -729,7 +734,7 @@ class TestCriticGate:
     def test_reject_returns_nudge(self):
         """When critic rejects, gate returns feedback nudge."""
         from unittest.mock import patch, MagicMock
-        from agent.continuous_work_critic import critic_gate, CircuitBreaker, CriticVerdict
+        from agent.continuous_work_critic import critic_gate, CriticVerdict
 
         agent = MagicMock()
         agent._cw_critic_model = None

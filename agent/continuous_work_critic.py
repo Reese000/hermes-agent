@@ -213,32 +213,6 @@ class TurnEvidence:
         return "\n".join(lines)
 
 
-class CircuitBreaker:
-    """Backward-compatible wrapper around LoopDetector.
-
-    The circuit breaker is effectively disabled (max_strikes=999999) so CW
-    continues indefinitely until the critic approves. Use LoopDetector
-    directly for new code.
-    """
-
-    def __init__(self, max_strikes: int = 999999):
-        self.max_strikes = max_strikes
-        self.strike_count = 0
-        self.last_rejection_reason = ""
-        self.tripped = False
-
-    def record_rejection(self, reason: str) -> str | None:
-        return None  # Never trips — CW continues until critic approves
-
-    def record_approval(self) -> None:
-        self.strike_count = 0
-        self.tripped = False
-
-    @property
-    def strikes_remaining(self) -> int:
-        return max(0, self.max_strikes - self.strike_count)
-
-
 def gather_turn_evidence(messages: list[dict[str, Any]]) -> TurnEvidence:
     """Extract evidence of work from the CURRENT TURN's messages only.
 
@@ -560,7 +534,7 @@ def invoke_critic(
         )
 
 
-# ─── Circuit Breaker ──────────────────────────────────────────────────────────
+# ─── Critic LLM Call ──────────────────────────────────────────────────────────
 
 @dataclass
 class LoopDetector:
@@ -826,65 +800,6 @@ def parse_critic_response(response: str) -> CriticVerdict:
 
 
 # ─── Critic LLM Call ──────────────────────────────────────────────────────────
-
-def _build_critic_prompt(
-    user_request: str,
-    agent_response: str,
-    evidence: TurnEvidence,
-) -> str:
-    """Build the critic review prompt with evidence."""
-    parts = [
-        "## User Request",
-        user_request or "(no explicit request — agent was working autonomously)",
-        "",
-        "## Agent's Final Response",
-        agent_response[:5000] if agent_response else "(empty response)",
-        "",
-        "## Evidence of Work Performed",
-        evidence.summary(),
-        "",
-        "## Evidence Inventory",
-        f"Terminal commands run: {len(evidence.terminal_commands)}",
-        f"Terminal output samples: {len(evidence.terminal_outputs)}",
-        f"Test results: {len(evidence.test_results)}",
-        f"Files written: {len(evidence.files_written)}",
-        f"Files patched: {len(evidence.files_patched)}",
-        f"Verification output detected: {evidence.verification_output}",
-        f"Agent response length: {evidence.response_text_length} chars",
-        "",
-    ]
-
-    # Add terminal output samples
-    if evidence.terminal_outputs:
-        parts.append("## Terminal Output Samples")
-        for i, output in enumerate(evidence.terminal_outputs[:5]):
-            parts.append(f"### Command {i+1}")
-            parts.append(f"```\n{output[:1000]}\n```")
-        parts.append("")
-
-    # Add test results
-    if evidence.test_results:
-        parts.append("## Test/Verification Results")
-        for i, result in enumerate(evidence.test_results[:5]):
-            parts.append(f"### Result {i+1}")
-            parts.append(f"```\n{result[:1000]}\n```")
-        parts.append("")
-
-    parts.extend([
-        "## Instructions",
-        "Review the agent's work against all 7 evaluation criteria.",
-        "IMPORTANT: Do NOT auto-reject based on work_tool_calls count alone.",
-        "Terminal commands (pytest, git, build tools) ARE real work even if",
-        "work_tool_calls is 0 (the calls may be from earlier turns). Look at",
-        "the Terminal Output Samples and Test Results sections for evidence.",
-        "Only REJECT criterion #1 if there are ZERO terminal outputs AND zero",
-        "files written/patched AND zero test results.",
-        "If the agent claims completion but didn't verify, REJECT with violation of criterion #3.",
-        "Respond in the exact format specified in the system prompt.",
-    ])
-
-    return "\n".join(parts)
-
 
 def invoke_critic(
     *,

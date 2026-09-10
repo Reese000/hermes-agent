@@ -12,7 +12,6 @@ from unittest.mock import MagicMock, patch
 
 from agent import conversation_loop
 from agent.continuous_work_critic import (
-    CircuitBreaker,
     TurnEvidence,
     gather_turn_evidence,
     critic_gate,
