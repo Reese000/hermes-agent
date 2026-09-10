@@ -672,16 +672,40 @@ def invoke_critic(
         {"role": "user", "content": prompt},
     ]
 
+    # Hard timeout: use threading to enforce a ceiling on the LLM call.
+    # Some backends ignore the timeout param, so we enforce it externally.
+    import threading
+    _hard_timeout = max(timeout * 2, 30.0)  # at least 30s
+    _result = [None]
+    _error = [None]
+    _done = threading.Event()
+
+    def _do_call():
+        try:
+            _result[0] = call_llm(
+                task="continuous_work_critic",
+                messages=messages,
+                model=critic_model,
+                provider=critic_provider,
+                main_runtime=main_runtime,
+                timeout=timeout,
+                temperature=0.1,
+            )
+        except Exception as e:
+            _error[0] = e
+        finally:
+            _done.set()
+
+    _t = threading.Thread(target=_do_call, daemon=True)
+    _t.start()
+    _done.wait(timeout=_hard_timeout)
+
     try:
-        response = call_llm(
-            task="continuous_work_critic",
-            messages=messages,
-            model=critic_model,
-            provider=critic_provider,
-            main_runtime=main_runtime,
-            timeout=timeout,
-            temperature=0.1,  # Low temperature for consistent judgments
-        )
+        if not _done.is_set():
+            raise TimeoutError(f"Critic LLM call exceeded hard timeout ({_hard_timeout:.0f}s)")
+        if _error[0] is not None:
+            raise _error[0]
+        response = _result[0]
 
         # Extract text from response
         # call_llm returns either a string, a dict, or a ChatCompletion object

@@ -734,3 +734,47 @@ class TestCriticGate:
         assert "REQUEST CW OFF" not in src
         assert "_declared_override" not in src
         assert "personal failure" not in src
+class TestParseStatusFormats:
+    """Verify parse_critic_response handles both status formats."""
+
+    def test_status_format_approved(self):
+        """[STATUS]\nAPPROVED format."""
+        from agent.continuous_work_critic import parse_critic_response
+        r = parse_critic_response("[STATUS]\nAPPROVED\n\n[VIOLATIONS]\nNone\n\n[CRITIQUE]\nGood.\n\n[REQUIRED_ACTION]\nNone")
+        assert r.passed is True
+        assert r.status == "APPROVED"
+
+    def test_status_format_rejected(self):
+        """[STATUS]\nREJECTED format."""
+        from agent.continuous_work_critic import parse_critic_response
+        r = parse_critic_response("[STATUS]\nREJECTED\n\n[VIOLATIONS]\n1\n\n[CRITIQUE]\nBad.\n\n[REQUIRED_ACTION]\nFix")
+        assert r.passed is False
+        assert r.status == "REJECTED"
+
+    def test_direct_format_approved(self):
+        """[APPROVED] format (no STATUS prefix)."""
+        from agent.continuous_work_critic import parse_critic_response
+        r = parse_critic_response("[APPROVED]\n\n[VIOLATIONS]\nNone\n\n[CRITIQUE]\nGood work.\n\n[REQUIRED_ACTION]\nNone")
+        assert r.passed is True
+        assert r.status == "APPROVED"
+
+    def test_direct_format_rejected(self):
+        """[REJECTED] format (no STATUS prefix)."""
+        from agent.continuous_work_critic import parse_critic_response
+        r = parse_critic_response("[REJECTED]\n\n[VIOLATIONS]\n1, 3\n\n[CRITIQUE]\nNeeds work.\n\n[REQUIRED_ACTION]\nFix it")
+        assert r.passed is False
+        assert r.status == "REJECTED"
+
+    def test_direct_approved_case_insensitive(self):
+        """[Approved] mixed case should work."""
+        from agent.continuous_work_critic import parse_critic_response
+        r = parse_critic_response("[Approved]\n\n[VIOLATIONS]\nNone\n\n[CRITIQUE]\nOK.\n\n[REQUIRED_ACTION]\nNone")
+        assert r.passed is True
+
+    def test_both_formats_extract_violations(self):
+        """Both formats should extract violations correctly."""
+        from agent.continuous_work_critic import parse_critic_response
+        r1 = parse_critic_response("[STATUS]\nREJECTED\n\n[VIOLATIONS]\n1, 3, 5\n\n[CRITIQUE]\nBad.\n\n[REQUIRED_ACTION]\nFix")
+        assert r1.violations == ["1", "3", "5"]
+        r2 = parse_critic_response("[REJECTED]\n\n[VIOLATIONS]\n2, 4\n\n[CRITIQUE]\nBad.\n\n[REQUIRED_ACTION]\nFix")
+        assert r2.violations == ["2", "4"]
