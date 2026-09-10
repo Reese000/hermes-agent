@@ -591,6 +591,20 @@ def parse_critic_response(response: str) -> CriticVerdict:
             raw_response=response,
         )
 
+    # Strip <thinking>...</thinking> tags — DeepSeek models wrap responses
+    # in these. Try removing tags first (structured output outside tags),
+    # then extract from inside tags if nothing found outside.
+    import re as _re
+    _cleaned = _re.sub(r"<thinking>.*?</thinking>", "", response, flags=_re.DOTALL).strip()
+    if "[STATUS]" in _cleaned or "[APPROVED]" in _cleaned or "[REJECTED]" in _cleaned:
+        response = _cleaned
+    else:
+        _matches = _re.findall(r"<thinking>(.*?)</thinking>", response, flags=_re.DOTALL)
+        if _matches:
+            response = chr(10).join(_matches).strip()
+    # Final cleanup: strip any remaining orphaned thinking tags
+    response = _re.sub(r"</?thinking>", "", response).strip()
+
     # Extract status
     status_match = re.search(r"\[STATUS\]\s*\n?\s*(APPROVED|REJECTED)|\[(APPROVED|REJECTED)\]", response, re.IGNORECASE)
     status = (status_match.group(1) or status_match.group(2)).upper() if status_match else None
