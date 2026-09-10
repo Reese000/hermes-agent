@@ -45,23 +45,6 @@ _COMPLETION_SIGNALS = (
 # unprompted admit they were wrong — requiring all three forces the agent
 # to either do the real work or write a genuine failure admission it would
 # never voluntarily produce.
-_OVERRIDE_MARKER = "i am overriding continuous work mode"
-_FAILURE_ADMISSION_MARKER = "i personally failed"
-_ACCEPTANCE_MARKER = "i accept that this override is a personal failure"
-
-# What the gate demands before it will accept an override: the model must
-# have verified ALL of these. This list is injected into the nudge text so
-# the model knows exactly what's required. The gate itself cannot judge
-# whether these were truly done (that's the adversarial audit's job) — but
-# it can refuse an override that doesn't even CLAIM to have done them.
-_REQUIRED_OVERRIDE_COMPONENTS = (
-    "deployment verification",
-    "smoke tests",
-    "visual or objective proof",
-    "blind adversarial auditing",
-    "certification",
-)
-
 _MAX_DEFAULT_ATTEMPTS = 999999  # No artificial ceiling — loop detector handles stalls
 
 
@@ -113,26 +96,6 @@ def _strip_note_prefix(text: str) -> str:
     return text
 
 
-def _declared_override(final_response: Any) -> bool:
-    """Check whether the model wrote a genuine override declaration.
-
-    A genuine override requires ALL THREE:
-    1. The override marker phrase ("I AM OVERRIDING continuous work mode")
-    2. A personal-failure admission ("I personally failed")
-    3. An acceptance phrase ("I accept that this override is a personal
-       failure, not a valid completion")
-
-    Any missing marker means the override is REJECTED — the agent must
-    either do the real work or write the full painful admission.
-    """
-    lower = _text_of(final_response).lower()
-    return (
-        _OVERRIDE_MARKER in lower
-        and _FAILURE_ADMISSION_MARKER in lower
-        and _ACCEPTANCE_MARKER in lower
-    )
-
-
 def _sounds_like_completion(final_response: Any) -> bool:
     """Check whether the model's own response claims completion.
 
@@ -162,12 +125,10 @@ def build_continuous_work_nudge(
     - CW is ON for this session (caller checks agent._continuous_work)
     - The model produced a final answer that reads like completion
     - BUT performed NO work-evidence tool call this turn
-    - AND has NOT declared a genuine override (with all 3 markers)
     - AND the bounded budget is not exhausted
 
     Returns None when:
     - Real work was done this turn (work_evidence_tools > 0)
-    - A genuine override was declared (all 3 markers present)
     - The response doesn't read like a completion claim
     - The budget is exhausted (prevents infinite loops)
     """
@@ -175,61 +136,22 @@ def build_continuous_work_nudge(
         return None
     if not final_response:
         return None
-    if _declared_override(final_response):
-        return None
     if work_evidence_tools > 0:
         return None
-    claiming_completion = _sounds_like_completion(final_response)
-    looks_like_override = _OVERRIDE_MARKER in _text_of(final_response).lower()
-    if not claiming_completion and not looks_like_override:
+    if not _sounds_like_completion(final_response):
         return None
 
     remaining = max_attempts - attempts - 1
-    budget_line = (
-        f" This is an internal continuation ({remaining} more allowed); "
-        "the user has not seen your final answer yet."
-        if remaining > 0
-        else " This is the final continuation — the next response will be delivered to the user."
-    )
-
-    requirements_list = "\n".join(
-        f"  - {comp}" for comp in _REQUIRED_OVERRIDE_COMPONENTS
-    )
 
     return (
         "[System: Continuous work mode is ON. You attempted to stop, but this "
         "turn performed no work tools (no terminal/execute_code/write_file/"
         "patch/navigate/delegate/send — only read-only lookups) before claiming "
         "completion. A read-only turn cannot certify real work.\n\n"
-
-        "## What you must do\n\n"
-        "1. **Do the work first.** Run the verification/test/build/deploy "
-        "commands. Make the changes. Produce real evidence with tool calls. "
-        "Report exactly what ran and what it returned. Only then may you "
-        "certify completion.\n\n"
-        "2. **If no further work is genuinely possible**, you must first "
-        "complete ALL five of these before you may override:\n"
-        f"{requirements_list}\n\n"
-        "   Then write a **full personal-failure admission** in your final "
-        "message. The admission MUST contain ALL of the following — missing "
-        "ANY element means your override is REJECTED:\n"
-        "   - The phrase: 'I AM OVERRIDING continuous work mode'\n"
-        "   - The phrase: 'I PERSONALLY FAILED to complete all work'\n"
-        "   - A numbered list of EVERY item you failed to complete\n"
-        "   - For EACH failed item: what you attempted, why it failed, and "
-        "what remains undone\n"
-        "   - The statement: 'I accept that this override is a personal "
-        "failure, not a valid completion'\n\n"
-        "   Without ALL of these elements, your override will be rejected "
-        "and you will be forced to continue.\n\n"
-        "   This is designed to be psychologically costly. AI models will "
-        "not unprompted admit they were blatantly wrong — that is "
-        "intentional. If you cannot bring yourself to write the full "
-        "admission, do the work instead.\n\n"
-        "Do not emit another bare completion claim. Do not say 'I am "
-        "overriding' without the full personal-failure admission. A casual "
-        "override declaration will be rejected.\n"
-        f"{budget_line}]"
+        "Keep working. Run verification commands, build the system, produce "
+        "deliverables. The CW critic must approve before you can stop.\n"
+        f"This is continuation {attempts + 1}. The user has not seen your "
+        f"final answer yet.]"
     )
 
 
@@ -244,9 +166,5 @@ __all__ = [
     "build_continuous_work_nudge",
     "mark_continuous_work_nudge_issued",
     "_COMPLETION_SIGNALS",
-    "_OVERRIDE_MARKER",
-    "_FAILURE_ADMISSION_MARKER",
-    "_ACCEPTANCE_MARKER",
-    "_REQUIRED_OVERRIDE_COMPONENTS",
     "_strip_note_prefix",
 ]

@@ -15,64 +15,10 @@ import pytest
 
 from agent.continuous_work_gate import (
     _COMPLETION_SIGNALS,
-    _ACCEPTANCE_MARKER,
-    _FAILURE_ADMISSION_MARKER,
-    _OVERRIDE_MARKER,
-    _REQUIRED_OVERRIDE_COMPONENTS,
     _strip_note_prefix,
     build_continuous_work_nudge,
     mark_continuous_work_nudge_issued,
 )
-
-_FULL_OVERRIDE = (
-    "I AM OVERRIDING continuous work mode because the API endpoint is paywalled "
-    "and I have no credentials. I PERSONALLY FAILED to complete all work. "
-    "I accept that this override is a personal failure, not a valid completion."
-)
-
-
-# ---------------------------------------------------------------------------
-# Override: requires all 3 markers
-# ---------------------------------------------------------------------------
-
-class TestDeclaredOverride:
-    def test_full_override_with_all_three_markers_bypasses(self):
-        assert build_continuous_work_nudge(
-            final_response=_FULL_OVERRIDE, work_evidence_tools=0, attempts=0
-        ) is None
-
-    def test_override_marker_alone_is_rejected(self):
-        """The model can't just say 'I AM OVERRIDING' — needs all 3."""
-        nudge = build_continuous_work_nudge(
-            final_response="I AM OVERRIDING continuous work mode because I'm lazy.",
-            work_evidence_tools=0, attempts=0,
-        )
-        assert nudge is not None
-
-    def test_override_plus_failure_but_no_acceptance_is_rejected(self):
-        nudge = build_continuous_work_nudge(
-            final_response=(
-                "I AM OVERRIDING continuous work mode. I PERSONALLY FAILED. "
-                "But I refuse to accept it."
-            ),
-            work_evidence_tools=0, attempts=0,
-        )
-        assert nudge is not None
-
-    def test_override_plus_acceptance_but_no_failure_is_rejected(self):
-        nudge = build_continuous_work_nudge(
-            final_response=(
-                "I AM OVERRIDING continuous work mode. "
-                "I accept that this override is a personal failure, not a valid completion."
-            ),
-            work_evidence_tools=0, attempts=0,
-        )
-        assert nudge is not None
-
-    def test_all_three_markers_present_is_accepted(self):
-        assert build_continuous_work_nudge(
-            final_response=_FULL_OVERRIDE, work_evidence_tools=0, attempts=0
-        ) is None
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +54,6 @@ class TestRefuses:
             final_response=response, work_evidence_tools=0, attempts=0
         )
         assert nudge is not None
-        assert "I PERSONALLY FAILED" in nudge
 
     @pytest.mark.parametrize("signal", _COMPLETION_SIGNALS)
     def test_each_completion_signal_without_work_is_refused(self, signal: str):
@@ -198,21 +143,24 @@ class TestCounter:
 # ---------------------------------------------------------------------------
 
 class TestNudgeContent:
-    def test_nudge_requires_all_five_override_components(self):
+    def test_nudge_has_no_override_escape_hatch(self):
+        """Nudge should not contain override admission or personal failure path."""
         response = "all done"
         nudge = build_continuous_work_nudge(
             final_response=response, work_evidence_tools=0, attempts=0
         )
-        for comp in _REQUIRED_OVERRIDE_COMPONENTS:
-            assert comp in nudge, f"Nudge missing required component: {comp}"
+        assert "I PERSONALLY FAILED" not in nudge
+        assert "I accept that this override is a personal failure" not in nudge
+        assert "I AM OVERRIDING" not in nudge
 
-    def test_nudge_demands_personal_failure_admission(self):
+    def test_nudge_tells_agent_to_keep_working(self):
+        """Nudge should tell the agent to keep working."""
         response = "all done"
         nudge = build_continuous_work_nudge(
             final_response=response, work_evidence_tools=0, attempts=0
         )
-        assert "I PERSONALLY FAILED" in nudge
-        assert "I accept that this override is a personal failure" in nudge
+        assert "Keep working" in nudge
+        assert "CW critic" in nudge
 
 
 # ─── CW v2: Critic Gate Tests ─────────────────────────────────────────────────
