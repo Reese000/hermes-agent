@@ -228,11 +228,11 @@ class TestParseCriticResponse:
         assert "3" in r.violations
 
     def test_no_status_positive_critique_approved(self):
-        """When LLM omits [STATUS], positive critique with no violations = APPROVED."""
+        """When LLM omits [STATUS], strong approval language with no violations = APPROVED."""
         r = parse_critic_response(
-            "The work is exceptional and meets all criteria.\n\n"
+            "The work meets the bar and should be considered complete.\n\n"
             "[VIOLATIONS]\nNone\n\n"
-            "[CRITIQUE]\nThe work is solid and well-structured.\n\n"
+            "[CRITIQUE]\nThe work is exceptional quality and production-ready and verified.\n\n"
             "[REQUIRED_ACTION]\nNone"
         )
         assert r.passed is True
@@ -264,12 +264,14 @@ class TestParseCriticResponse:
         assert r.passed is False
 
     def test_positive_signals_detected(self):
-        """All positive signals should trigger approval when no [STATUS]."""
-        for signal in ["substantial", "verified", "solid", "exceptional",
-                       "meets the bar", "polished", "thorough", "strong"]:
+        """Strong approval signals should trigger approval when no [STATUS]."""
+        for signal in ["warrants approval", "meets the bar",
+                       "should be considered complete",
+                       "deserves special recognition",
+                       "exceptional quality", "production-ready and verified"]:
             r = parse_critic_response(
                 f"The work review.\n\n[VIOLATIONS]\nNone\n\n"
-                f"[CRITIQUE]\nThe work is {signal} and well-structured.\n\n"
+                f"[CRITIQUE]\nThe work {signal}.\n\n"
                 "[REQUIRED_ACTION]\nNone"
             )
             assert r.passed is True, f"Signal '{signal}' not detected as positive"
