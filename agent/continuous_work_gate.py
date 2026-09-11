@@ -1,14 +1,12 @@
 """Turn-end enforcement gate for continuous work mode.
 
-Policy-only, like verification_stop.py: it never re-runs checks itself; it
-turns the per-turn evidence counter into a bounded follow-up.
+Policy-only: it never re-runs checks itself; it turns the per-turn evidence
+counter into a bounded follow-up.
 
-The gate makes override psychologically expensive for the model. AI models
-will never unprompted admit they were blatantly wrong — so the override
-declaration requires the model to fully write out its admission of personal
-failure, listing every specific thing it failed to do and why. This is the
-deterrent: a casual "I am overriding" is not accepted. The model must
-actually reckon with its own incompleteness in front of the user.
+The gate fires when the agent claims completion but performed no work-evidence
+tool calls (only read-only lookups). It forces the agent to continue working
+until the adversarial critic approves termination. The loop detector handles
+stalls; there is no hard ceiling or artificial termination limit.
 """
 
 from __future__ import annotations

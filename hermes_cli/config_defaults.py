@@ -219,12 +219,6 @@ DEFAULT_CONFIG = {
         # still toggle CW off mid-session via [CW OFF] marker, and the user
         # can toggle via /cw command or statusbar. Default False.
         "continuous_work_default": False,
-        # Maximum number of CW nudges per turn before the hard ceiling kicks
-        # in and forces the agent to stop. This prevents infinite loops when
-        # the critic approves but the parser defaults to REJECTED (old code).
-        # Lower values = faster escape from loops; higher values = more
-        # chances for the critic to approve. Default 5.
-        "continuous_work_max_nudges": 5,
         "continuous_work_critic_model": "deepseek/deepseek-v4-flash-0731",
         "continuous_work_critic_provider": "openrouter",
         # Local-environment toolchain probe — surfaces Python/pip/uv/PEP-668
