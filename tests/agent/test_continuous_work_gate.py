@@ -818,7 +818,7 @@ class TestInvokeCriticTimeout:
                 evidence=evidence, timeout=5.0,
             )
             elapsed = time.time() - start
-            # hard_timeout = min(5*1.5, 45) = 7.5s — should fire well before 50s
+            # hard_timeout = max(1.0, min(5*2, 90)) = 10s — should fire well before 50s
             assert elapsed < 50, f"Took {elapsed:.1f}s, should be < 50s"
             assert verdict.passed is False
             assert verdict.status == "REJECTED"
