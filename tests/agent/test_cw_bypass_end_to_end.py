@@ -30,7 +30,7 @@ class TestBypassEnforcementEndToEnd:
         tree = ast.parse(src)
         fn = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_conversation_turn"
         )
         # Find _cw_enforce_before_exit definition
         func_defs = [
@@ -50,7 +50,7 @@ class TestBypassEnforcementEndToEnd:
         tree = ast.parse(src)
         fn = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_conversation_turn"
         )
         func_defs = [
             n for n in ast.walk(fn)
@@ -65,7 +65,7 @@ class TestBypassEnforcementEndToEnd:
         tree = ast.parse(src)
         fn = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_conversation_turn"
         )
         func_defs = [
             n for n in ast.walk(fn)
@@ -83,7 +83,7 @@ class TestBypassEnforcementEndToEnd:
         tree = ast.parse(src)
         fn = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_conversation_turn"
         )
         func_defs = [
             n for n in ast.walk(fn)

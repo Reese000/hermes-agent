@@ -17,19 +17,19 @@ class TestCWRuntimeWiring:
     """Proves the critic gate is wired into the production turn loop."""
 
     def test_critic_gate_call_node_in_turn_loop(self):
-        """Static: critic_gate is invoked inside run_conversation's body."""
+        """Static: critic_gate is invoked inside _run_conversation_turn's body."""
         src = inspect.getsource(conversation_loop)
         tree = ast.parse(src)
         fn = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_conversation_turn"
         )
         gate_calls = [
             c for c in ast.walk(fn)
             if isinstance(c, ast.Call)
             and (getattr(c.func, "id", "") == "critic_gate" or getattr(c.func, "attr", "") == "critic_gate")
         ]
-        assert gate_calls, "critic_gate call node not found in run_conversation"
+        assert gate_calls, "critic_gate call node not found in _run_conversation_turn"
 
     def test_gate_guarded_by_continuous_work_flag(self):
         """Static: the gate call sits under the _continuous_work guard."""
@@ -37,7 +37,7 @@ class TestCWRuntimeWiring:
         tree = ast.parse(src)
         fn = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_conversation_turn"
         )
         if_nodes = [n for n in ast.walk(fn) if isinstance(n, ast.If)]
         guarded = any("_continuous_work" in ast.unparse(n.test) for n in if_nodes)
@@ -109,14 +109,14 @@ class TestCWBypassEnforcement:
         tree = ast.parse(src)
         fn = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_conversation_turn"
         )
         # Find the _cw_enforce_before_exit function definition
         func_defs = [
             n for n in ast.walk(fn)
             if isinstance(n, ast.FunctionDef) and n.name == "_cw_enforce_before_exit"
         ]
-        assert func_defs, "_cw_enforce_before_exit not found in run_conversation"
+        assert func_defs, "_cw_enforce_before_exit not found in _run_conversation_turn"
         # Inside the function, verify it calls critic_gate
         func_src = ast.get_source_segment(src, func_defs[0])
         assert "critic_gate(" in func_src, (
@@ -129,7 +129,7 @@ class TestCWBypassEnforcement:
         tree = ast.parse(src)
         fn = next(
             n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == "run_conversation"
+            if isinstance(n, ast.FunctionDef) and n.name == "_run_conversation_turn"
         )
         func_defs = [
             n for n in ast.walk(fn)

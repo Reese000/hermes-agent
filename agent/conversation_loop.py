@@ -1674,57 +1674,6 @@ def run_conversation(
     """
     from agent.turn_context import export_current_turn_boundary
 
-    # Continuous Work enforcement: call before any early break
-    def _cw_enforce_before_exit(fr: str) -> bool:
-        """Return True (must continue) if CW gate rejects the exit."""
-        if not getattr(agent, "_continuous_work", False):
-            return False
-        try:
-            from agent.continuous_work_critic import LoopDetector, critic_gate
-            if not hasattr(agent, "_cw_loop_detector"):
-                agent._cw_loop_detector = LoopDetector()
-            _req = ""
-            for _m in reversed(conversation_history or []):
-                if isinstance(_m, dict) and _m.get("role") == "user":
-                    _c = _m.get("content", "")
-                    if isinstance(_c, str) and not _c.startswith("[System:"):
-                        _req = _c[:2000]
-                        break
-                    elif isinstance(_c, list):
-                        for _p in _c:
-                            if isinstance(_p, dict) and _p.get("type") == "text":
-                                _req = _p.get("text", "")[:2000]
-                                break
-                        if _req:
-                            break
-            nudge = critic_gate(
-                agent=agent,
-                final_response=fr,
-                messages=conversation_history or [],
-                user_request=_req,
-                loop_detector=agent._cw_loop_detector,
-            )
-            if nudge is None:
-                logger.info("CW bypass-path gate: APPROVED, allowing exit")
-                return False
-            try:
-                from agent.continuous_work_gate import mark_continuous_work_nudge_issued
-                mark_continuous_work_nudge_issued(agent)
-            except Exception:
-                agent._continuous_work_nudges = getattr(agent, "_continuous_work_nudges", 0) + 1
-            from agent.message_metadata import append_message
-            append_message(conversation_history or [], {
-                "role": "user",
-                "content": nudge,
-                "_continuous_work_synthetic": True,
-            })
-            agent._session_messages = conversation_history or []
-            logger.debug("CW bypass-path gate: REJECTED, forcing continuation")
-            return True
-        except Exception:
-            logger.debug("CW bypass-path gate failed, forcing continuation (fail-closed)", exc_info=True)
-            return True
-
     result = _run_conversation_turn(
         agent,
         user_message,
