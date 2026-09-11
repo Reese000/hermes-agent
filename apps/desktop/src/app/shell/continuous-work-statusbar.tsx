@@ -38,7 +38,12 @@ export function useContinuousWorkStatusbarItem(
         requestGateway('session.set_continuous_work', {
           session_id: sessionId,
           enabled
-        }).catch(() => { /* ignore — agent may not be running */ })
+        }).catch((err) => {
+          // Log but don't block — agent may not be running yet, or session
+          // may have been evicted. The config.yaml persistence below handles
+          // new sessions; this RPC is only for mid-turn propagation.
+          console.warn('[CW] mid-turn RPC failed:', err?.message ?? err)
+        })
       }
       // Persist to config.yaml so headless agents (kanban workers, cron,
       // new sessions) inherit CW. Only when a live gateway is present

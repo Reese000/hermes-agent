@@ -477,7 +477,7 @@ def _(rid, params: dict) -> dict:
     # shared launch db, which outlives the RPC and is never closed here.
     owns_db = False
     if profile_home is not None:
-        from hermes_state import get_shared_session_db
+        from hermes_state_registry import acquire as get_shared_session_db
 
         db = get_shared_session_db(profile_home / "state.db")
         owns_db = True
@@ -537,7 +537,7 @@ def _(rid, params: dict) -> dict:
                 if live is not None:
                     if owns_db:
                         with contextlib.suppress(Exception):
-                            from hermes_state import release_or_close
+                            from hermes_state_registry import release_or_close
                             release_or_close(db)
                     live["last_active"] = time.time()
                     # This resume reattaches the live record. A lazy session
@@ -3422,7 +3422,7 @@ def _(rid, params: dict) -> dict:
             # DEDICATED handle, same ownership rule as session.resume: ours
             # until the branched agent takes it below. _make_agent raising, or
             # _init_session raising, both leave here without that transfer.
-            from hermes_state import get_shared_session_db
+            from hermes_state_registry import acquire as get_shared_session_db
             branch_db = get_shared_session_db(Path(parent_home) / "state.db")
             branch_owns_db = True
         home_token = (
@@ -3486,7 +3486,7 @@ def _(rid, params: dict) -> dict:
     finally:
         if branch_owns_db and branch_db is not None:
             with contextlib.suppress(Exception):
-                from hermes_state import release_or_close
+                from hermes_state_registry import release_or_close
                 release_or_close(branch_db)
     branched_session = _sessions.get(new_sid)
     return _ok(
@@ -3554,8 +3554,12 @@ def _(rid, params: dict) -> dict:
 
     The frontend calls this when the user clicks the CW statusbar toggle while
     the agent is running — the flag propagates without waiting for the next turn.
+
+    Uses _sess_building (not _sess) to avoid blocking 30s on _wait_agent when
+    the agent is still constructing. The session flag can be set immediately;
+    the agent._continuous_work sync is best-effort.
     """
-    session, err = _sess(params, rid)
+    session, err = _sess_building(params, rid)
     if err:
         return err
     enabled = bool(params.get("enabled", False))
