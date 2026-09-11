@@ -805,6 +805,42 @@ def critic_gate(
     if loop_detector is None:
         loop_detector = LoopDetector()
 
+    # Check for explicit user override: if the user has explicitly said
+    # "stop", "override", "enough", "done", or similar, approve immediately
+    # without invoking the critic. The CW protocol says "The user can ALWAYS
+    # override you to stop (explicit user command)." This check must happen
+    # BEFORE the critic invocation to prevent infinite loops when the user
+    # wants to stop but the critic keeps rejecting.
+    _USER_OVERRIDE_KEYWORDS = {
+        "stop", "override", "enough", "done", "quit", "exit",
+        "you can stop", "stop working", "you are looping",
+        "that's enough", "we're done", "that is enough",
+    }
+    for _msg in reversed(messages):
+        if not isinstance(_msg, dict) or _msg.get("role") != "user":
+            continue
+        _c = _msg.get("content", "")
+        if isinstance(_c, list):
+            for _p in _c:
+                if isinstance(_p, dict) and _p.get("type") == "text":
+                    _c = _p.get("text", "")
+                    break
+        if not isinstance(_c, str):
+            continue
+        _cl = _c.lower().strip()
+        # Check for explicit user stop signals (not CW protocol text).
+        # Skip messages that start with CW protocol markers — those are
+        # injected by the system, not from the user.
+        if _cl.startswith("[system:") or _cl.startswith("# continuous work"):
+            continue
+        if _cl in _USER_OVERRIDE_KEYWORDS:
+            logger.info("CW critic gate: user override detected (%s), APPROVING", _cl)
+            return None
+        # Also check multi-word phrases as substrings
+        if any(kw in _cl for kw in _USER_OVERRIDE_KEYWORDS if " " in kw):
+            logger.info("CW critic gate: user override detected, APPROVING")
+            return None
+
     # Gather evidence from the turn
     evidence = gather_turn_evidence(messages)
 
