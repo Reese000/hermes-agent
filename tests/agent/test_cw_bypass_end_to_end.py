@@ -516,3 +516,86 @@ class TestCriticismEndToEnd:
                 loop_detector=ld,
             )
         assert result is not None
+
+
+class TestUserOverrideDetection:
+    """Proves the critic gate detects explicit user stop signals."""
+
+    def _make_agent(self):
+        from unittest.mock import MagicMock
+        agent = MagicMock()
+        agent._continuous_work = True
+        agent._cw_critic_model = "deepseek/deepseek-v4-flash-0731"
+        agent._cw_critic_provider = "openrouter"
+        agent._main_runtime = None
+        return agent
+
+    def test_stop_keyword_approves_immediately(self):
+        """User saying 'stop' should approve without invoking critic."""
+        from agent.continuous_work_critic import critic_gate
+        agent = self._make_agent()
+        messages = [
+            {"role": "user", "content": "do something"},
+            {"role": "assistant", "content": "I did it"},
+            {"role": "user", "content": "stop"},
+        ]
+        result = critic_gate(
+            agent=agent, final_response="done",
+            messages=messages, user_request="do something",
+        )
+        assert result is None, "Should approve when user says 'stop'"
+
+    def test_override_keyword_approves_immediately(self):
+        """User saying 'override' should approve without invoking critic."""
+        from agent.continuous_work_critic import critic_gate
+        agent = self._make_agent()
+        messages = [
+            {"role": "user", "content": "do something"},
+            {"role": "assistant", "content": "I did it"},
+            {"role": "user", "content": "override"},
+        ]
+        result = critic_gate(
+            agent=agent, final_response="done",
+            messages=messages, user_request="do something",
+        )
+        assert result is None, "Should approve when user says 'override'"
+
+    def test_looping_keyword_approves_immediately(self):
+        """User saying 'you are looping' should approve without invoking critic."""
+        from agent.continuous_work_critic import critic_gate
+        agent = self._make_agent()
+        messages = [
+            {"role": "user", "content": "do something"},
+            {"role": "assistant", "content": "I did it"},
+            {"role": "user", "content": "you are looping"},
+        ]
+        result = critic_gate(
+            agent=agent, final_response="done",
+            messages=messages, user_request="do something",
+        )
+        assert result is None, "Should approve when user says 'you are looping'"
+
+    def test_cw_protocol_message_not_treated_as_override(self):
+        """CW protocol messages should NOT trigger user override."""
+        from agent.continuous_work_critic import critic_gate
+        from unittest.mock import patch
+        agent = self._make_agent()
+        messages = [
+            {"role": "user", "content": "[System: CW is active] stop"},
+        ]
+        # The critic LLM would normally be called, but we want to verify
+        # that the CW protocol message doesn't trigger the override.
+        # Since the message starts with [System:, it should be skipped.
+        with patch("agent.continuous_work_critic.invoke_critic") as mock_crit:
+            from agent.continuous_work_critic import CriticVerdict
+            mock_crit.return_value = CriticVerdict(
+                passed=False, status="REJECTED",
+                critique="needs more work", required_action="keep going",
+                raw_response="[STATUS]\nREJECTED",
+            )
+            result = critic_gate(
+                agent=agent, final_response="done",
+                messages=messages, user_request="do something",
+            )
+            # Should have called the critic (not short-circuited by override)
+            mock_crit.assert_called_once()
