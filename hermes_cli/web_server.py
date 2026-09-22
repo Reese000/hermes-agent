@@ -8907,7 +8907,7 @@ def _approval_mode_of(config: Dict[str, Any]) -> str:
     suppress the broadcast exactly when the mode changed. Absent block or
     key normalizes to the same default the approval gate uses.
     """
-    from tools.approval import _normalize_approval_mode
+    from tools.approval_context import _normalize_approval_mode
 
     approvals = config.get("approvals")
     default_mode = (DEFAULT_CONFIG.get("approvals") or {}).get("mode", "manual")
