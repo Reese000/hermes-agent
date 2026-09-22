@@ -91,7 +91,7 @@ def test_check_via_local_git_fetch_failure_returns_none(tmp_path, monkeypatch):
     (repo_dir / ".git").mkdir()
 
     # Simulate a non-shallow, non-SSH-remote checkout
-    def mock_git_stdout(args, *, cwd, timeout=5):
+    def mock_git_stdout(args, *, cwd, timeout=5, network=False):
         if args[:2] == ["remote", "get-url"]:
             return "https://github.com/NousResearch/hermes-agent.git"
         if args[:2] == ["rev-parse", "--is-shallow-repository"]:
@@ -142,7 +142,7 @@ def test_check_via_local_git_fetch_failure_keeps_positive_stale_count(tmp_path, 
     repo_dir.mkdir()
     (repo_dir / ".git").mkdir()
 
-    def mock_git_stdout(args, *, cwd, timeout=5):
+    def mock_git_stdout(args, *, cwd, timeout=5, network=False):
         if args[:2] == ["remote", "get-url"]:
             return "https://github.com/NousResearch/hermes-agent.git"
         if args[:2] == ["rev-parse", "--is-shallow-repository"]:
@@ -180,7 +180,7 @@ def test_check_via_local_git_fetch_failure_rev_list_error_returns_none(tmp_path,
     repo_dir.mkdir()
     (repo_dir / ".git").mkdir()
 
-    def mock_git_stdout(args, *, cwd, timeout=5):
+    def mock_git_stdout(args, *, cwd, timeout=5, network=False):
         if args[:2] == ["remote", "get-url"]:
             return "https://github.com/NousResearch/hermes-agent.git"
         if args[:2] == ["rev-parse", "--is-shallow-repository"]:
@@ -273,3 +273,90 @@ def test_check_for_updates_does_not_cache_none(tmp_path, monkeypatch):
 
 
 
+
+
+def _git_id_env():
+    import os as _os
+    return {**_os.environ,
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+
+
+def _git(repo, *args):
+    import subprocess
+    out = subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+                         text=True, encoding="utf-8", env=_git_id_env())
+    assert out.returncode == 0, f"git {args} failed: {out.stderr}"
+    return out.stdout.strip()
+
+
+def _commit(repo, msg):
+    (repo / "f.txt").write_text(msg + "\n")
+    _git(repo, "add", "f.txt")
+    _git(repo, "commit", "-m", msg)
+
+
+def test_check_for_updates_counts_upstream_behind_for_forks(tmp_path, monkeypatch):
+    """Fork installs (origin = the fork itself, synced each push; upstream =
+    official) must count behind upstream/main. Comparing against origin can
+    never show a gap on a fork — that is the bug this guards."""
+    from unittest.mock import patch as _patch
+    from hermes_cli.banner import check_for_updates
+
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-b", "main")
+    _commit(work, "base")
+    origin = tmp_path / "origin.git"
+    upstream = tmp_path / "upstream.git"
+    _git(work, "clone", "--bare", ".", str(origin))
+    _git(work, "clone", "--bare", ".", str(upstream))
+
+    pusher = tmp_path / "pusher"
+    _git(tmp_path, "clone", str(upstream), str(pusher))
+    for n in (1, 2, 3):
+        _commit(pusher, f"up{n}")
+    _git(pusher, "push", "origin", "main")
+
+    _git(work, "remote", "add", "origin", str(origin))
+    _git(work, "remote", "add", "upstream", str(upstream))
+    _git(work, "fetch", "origin")
+    _git(work, "fetch", "upstream")
+
+    home = tmp_path / "hermes_home"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("HERMES_REVISION", raising=False)
+    with _patch("hermes_cli.banner._resolve_repo_dir", return_value=work):
+        assert check_for_updates() == 3
+
+
+def test_check_for_updates_still_counts_origin_for_stock_installs(tmp_path, monkeypatch):
+    """No upstream remote: origin IS upstream (stock clone) — the count must
+    keep coming from origin/main, unchanged from prior behavior."""
+    from unittest.mock import patch as _patch
+    from hermes_cli.banner import check_for_updates
+
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-b", "main")
+    _commit(work, "base")
+    _git(work, "push_placeholder_noop" if False else "log", "-1", "--format=%H")
+    origin = tmp_path / "origin.git"
+    _git(work, "clone", "--bare", ".", str(origin))
+
+    pusher = tmp_path / "pusher"
+    _git(tmp_path, "clone", str(origin), str(pusher))
+    for n in (1, 2):
+        _commit(pusher, f"stock{n}")
+    _git(pusher, "push", "origin", "main")
+
+    _git(work, "remote", "add", "origin", str(origin))
+    _git(work, "fetch", "origin")
+
+    home = tmp_path / "hermes_home"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("HERMES_REVISION", raising=False)
+    with _patch("hermes_cli.banner._resolve_repo_dir", return_value=work):
+        assert check_for_updates() == 2

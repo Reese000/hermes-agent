@@ -10,6 +10,7 @@ import {
   compareApiUrl,
   parseCompareBehindCount,
   resolveBehindCount,
+  resolveCompareTarget,
   resolveCommitLogSelection,
   shouldCountCommits
 } from './update-count'
@@ -299,4 +300,28 @@ test('parseCompareBehindCount rejects malformed payloads', () => {
   assert.equal(parseCompareBehindCount({ ahead_by: '61' }), null)
   assert.equal(parseCompareBehindCount({ ahead_by: 1.5 }), null)
   assert.equal(parseCompareBehindCount([]), null)
+})
+
+
+// Fork installs: origin tracks the fork itself (synced each push — always
+// equal to HEAD), so the behind-count must target the upstream remote.
+test('fork installs compare against the upstream remote', () => {
+  assert.deepEqual(resolveCompareTarget({ branch: 'main', hasUpstream: true }), {
+    remote: 'upstream',
+    ref: 'upstream/main'
+  })
+})
+
+test('stock installs keep origin as the compare target', () => {
+  assert.deepEqual(resolveCompareTarget({ branch: 'main', hasUpstream: false }), {
+    remote: 'origin',
+    ref: 'origin/main'
+  })
+})
+
+test('commit logs can select the upstream compare ref', () => {
+  assert.deepEqual(resolveCommitLogSelection({ branch: 'main', isShallow: false, remote: 'upstream' }), {
+    limit: 40,
+    revision: 'HEAD..upstream/main'
+  })
 })

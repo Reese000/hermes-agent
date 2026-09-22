@@ -31,10 +31,21 @@ function resolveBehindCount({ countStr, currentSha, targetSha, isShallow, target
 // Shallow history can also contaminate the changelog range. Trust the fetched
 // remote tip itself, but do not walk its ancestry. Full clones retain the
 // detailed range used by the existing update overlay.
-function resolveCommitLogSelection({ branch, isShallow }) {
-  const remote = `origin/${branch}`
+function resolveCommitLogSelection({ branch, isShallow, remote: remoteName = 'origin' }) {
+  const remote = `${remoteName}/${branch}`
 
   return isShallow ? { limit: 1, revision: remote } : { limit: 40, revision: `HEAD..${remote}` }
+}
+
+// Which remote the behind-count compares against. Fork installs track origin
+// at the fork itself (synced with every push — always equal to HEAD), so a
+// behind-count must use the upstream remote when one exists; stock installs
+// have no upstream remote and origin IS upstream. Pure decision here; the
+// async remote-URL probe lives with the caller.
+function resolveCompareTarget({ branch, hasUpstream }) {
+  const remote = hasUpstream ? 'upstream' : 'origin'
+
+  return { remote, ref: `${remote}/${branch}` }
 }
 
 // When the local graph can't count (behind === null), the GitHub compare API
@@ -89,4 +100,4 @@ function parseCompareBehindCount(payload) {
   return ahead
 }
 
-export { compareApiUrl, parseCompareBehindCount, resolveBehindCount, resolveCommitLogSelection, shouldCountCommits }
+export { compareApiUrl, parseCompareBehindCount, resolveBehindCount, resolveCompareTarget, resolveCommitLogSelection, shouldCountCommits }
