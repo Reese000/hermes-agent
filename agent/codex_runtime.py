@@ -1010,6 +1010,28 @@ def _event_field(event: Any, name: str, default: Any = None) -> Any:
     return value if value is not None else default
 
 
+_CODEX_PROGRESS_DELTA_TYPES = frozenset({
+    "response.output_text.delta", "response.reasoning_summary_text.delta", "response.text.delta",
+    "response.audio.delta", "response.function_call_arguments.delta", "response.reasoning_text.delta",
+})
+
+
+def _codex_event_has_content(event: Any) -> bool:
+    """Whether a Codex Responses event carries substantive forward progress.
+
+    Lifecycle/keepalive frames and empty structural deltas prove transport
+    liveness, but do not mean the model has begun producing its response.
+    """
+    event_type = _event_field(event, "type")
+    if event_type in _CODEX_PROGRESS_DELTA_TYPES:
+        return bool(_event_field(event, "delta"))
+    if event_type == "response.output_item.added":
+        item = _event_field(event, "item")
+        return "function_call" in str(_event_field(item, "type") or "") and any(
+            bool(_event_field(item, field)) for field in ("id", "call_id", "name", "arguments"))
+    return False
+
+
 def _item_field(item: Any, name: str, default: Any = None) -> Any:
     """Field access for nested Response items (attr-style SDK object or dict)."""
     value = getattr(item, name, None)
