@@ -253,3 +253,36 @@ class TestConnectivityChecks:
         assert ok is True
 
 
+
+
+def test_discovery_loaded_setup_module_exposes_post_setup(monkeypatch):
+    """`hermes memory setup mem0` reaches the wizard when the package is first imported by plugin
+    discovery, which execs sibling modules before ``__init__`` (#103078). The invariant is on the
+    module the loader actually cached, not on a normal top-level import."""
+    from plugins.memory import load_memory_provider
+    import plugins.memory as _memory_pkg
+
+    saved_attr = _memory_pkg.__dict__.get("mem0")
+    saved = {k: sys.modules.pop(k) for k in list(sys.modules) if k.startswith("plugins.memory.mem0")}
+    try:
+        provider = load_memory_provider("mem0", register_skills=False)
+        assert provider is not None
+        assert hasattr(sys.modules["plugins.memory.mem0._setup"], "post_setup")
+    finally:
+        for k in list(sys.modules):
+            if k.startswith("plugins.memory.mem0"):
+                del sys.modules[k]
+        sys.modules.update(saved)
+        # Re-importing above rebound the parent-package attribute to a FRESH
+        # module object; restoring sys.modules does not undo that binding.
+        # Left stale, every later monkeypatch of a string path like
+        # "plugins.memory.mem0._backend.OSSBackend" patches the orphan, while
+        # the provider class under test still comes from the original module —
+        # its relative `from ._backend import ...` (__init__.py `_create_backend`)
+        # resolves through sys.modules and never sees the patch. Test order then
+        # decides the outcome: TestCreateBackendRouting fails with KeyError
+        # 'llm' from the real OSSBackend whenever this test runs first.
+        if saved_attr is None:
+            _memory_pkg.__dict__.pop("mem0", None)
+        else:
+            _memory_pkg.__dict__["mem0"] = saved_attr

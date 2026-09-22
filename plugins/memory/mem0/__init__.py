@@ -38,6 +38,7 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 from agent.memory_provider import MemoryProvider
@@ -57,6 +58,12 @@ _PREFETCH_WAIT_SECS = 3
 # silently dropped the memory ("Cannot send a request, as the client has
 # been closed").
 _SYNC_SHUTDOWN_WAIT_SECS = 120
+# Per-message character cap applied by sync_turn() before the turn is ingested.
+# Small OSS embedders (Ollama bge-small-zh-v1.5, all-minilm: 512 tokens) raise on
+# oversized input, that failure was only logged, and the whole extraction was
+# silently dropped (#106235/#37421). Override with ``sync_max_chars`` in
+# mem0.json (e.g. 6000) for 8k-token embedders such as text-embedding-3-small.
+_SYNC_MSG_MAX_CHARS = 450
 
 _CLIENT_ERROR_TYPES = ("MemoryNotFoundError", "ValidationError")
 
@@ -75,6 +82,33 @@ def _is_client_error(exc: Exception) -> bool:
         return True
     err_str = str(exc).lower()
     return "404" in err_str or "not found" in err_str or "valid uuid" in err_str
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """True for broker-busy responses (HTTP 503 while another Hermes process still
+    holds the local Qdrant path lock). Environmental and self-healing: the broker
+    activates automatically when the lock frees, so these must NOT count toward
+    the circuit breaker (otherwise 5 back-to-back 503s would disable Mem0 for the
+    cooldown long after the lock was released)."""
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None)
+    if status == 503:
+        return True
+    return "mem0 store busy" in str(exc).lower()
+
+
+def _is_connection_error(exc: Exception) -> bool:
+    """True when the backend endpoint itself is unreachable (the local broker or a
+    self-hosted server died mid-session) — the backend must be dropped and rebuilt
+    so the next call re-runs ensure_broker() and respawns the broker."""
+    if type(exc).__name__ in ("ConnectError", "ConnectTimeout", "NewConnectionError"):
+        return True
+    err_str = str(exc).lower()
+    return (
+        "connection refused" in err_str
+        or "all connection attempts failed" in err_str
+        or "connect call failed" in err_str
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +148,36 @@ def _load_config() -> dict:
             pass
 
     return config
+
+
+def _read_mem0_json(config_path) -> dict:
+    """Read ``mem0.json`` as a dict; an absent, malformed or non-object file reads as {}.
+
+    Single tolerant reader for the setup wizard, which pre-fills prompts from the
+    existing file and merge-writes it back — a missing or hand-broken file must
+    not abort the wizard mid-setup.
+    """
+    try:
+        cfg = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _truncate_for_sync(text: str, max_chars: int) -> str:
+    """Cap ``text`` at ``max_chars``, stopping on the last sentence boundary that fits.
+
+    A mid-word cut would hand the extractor a fragment it reads as one garbled
+    sentence; no boundary at all falls back to a plain cut (better than dropping
+    the turn entirely).
+    """
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    boundary = max(cut.rfind("."), cut.rfind("!"), cut.rfind("?"))
+    if boundary == -1:
+        return cut.rstrip()
+    return cut[: boundary + 1]
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +351,33 @@ class Mem0MemoryProvider(MemoryProvider):
         try:
             if self._mode == "oss":
                 from ._backend import OSSBackend
-                return OSSBackend(self._config.get("oss", {}))
+                oss_cfg = self._config.get("oss", {})
+                # Path-mode Qdrant takes an EXCLUSIVE .lock per storage folder:
+                # only ONE process in the system may open the store, while Hermes
+                # runs many concurrent processes (desktop backend, gateway, cron,
+                # kanban CLI workers) that all build a backend at session init.
+                # A direct in-process client therefore worked for whoever won the
+                # race and failed everyone else with "already accessed by another
+                # instance". Route through the local broker instead: one long-lived
+                # process owns both locks, everyone else speaks loopback HTTP
+                # (local installation — no Docker, no mem0 server package: mem0
+                # 2.0.x ships none). Falls back to the legacy direct client only
+                # if the broker is explicitly disabled or could not be spawned.
+                if oss_cfg.get("vector_store", {}).get("config", {}).get("path"):
+                    try:
+                        from ._local_broker import BROKER_TIMEOUT_SECS, ensure_broker
+                        url = ensure_broker(oss_cfg)
+                        if url:
+                            from ._backend import SelfHostedBackend
+                            return SelfHostedBackend(
+                                self._api_key, url, timeout=BROKER_TIMEOUT_SECS
+                            )
+                    except Exception as broker_exc:
+                        logger.warning(
+                            "mem0 local broker unavailable, falling back to direct path client: %s",
+                            broker_exc,
+                        )
+                return OSSBackend(oss_cfg)
             if self._host:
                 from ._backend import SelfHostedBackend
                 return SelfHostedBackend(self._api_key, self._host)
@@ -297,6 +387,44 @@ class Mem0MemoryProvider(MemoryProvider):
             logger.error("Mem0 backend failed to initialize (%s mode): %s", self._mode, e)
             self._init_error = str(e)
             return None
+
+    # Minimum gap between lazy re-init attempts in _ensure_backend().
+    _RETRY_MIN_INTERVAL_SECS = 30.0
+
+    def _ensure_backend(self) -> bool:
+        """Rate-limited self-heal: (re)build the backend after a failed initialize()
+        or after an endpoint death dropped it. Session init often failed simply
+        because another process held the path lock at that instant — a permanently
+        dead session until restart was the old (buggy) outcome; this retries on the
+        next tool call instead. Broker spawn+wait is bounded (~10 s worst case) and
+        only runs on this user-invoked path, never on the hot prefetch path."""
+        if self._backend is not None:
+            return True
+        now = time.monotonic()
+        if now - getattr(self, "_last_reinit_attempt", 0.0) < self._RETRY_MIN_INTERVAL_SECS:
+            return False
+        self._last_reinit_attempt = now
+        backend = self._create_backend()
+        if backend is None:
+            return False
+        self._backend = backend
+        if not self._atexit_registered:
+            atexit.register(self._shutdown_backend)
+            self._atexit_registered = True
+        logger.info("Mem0: backend initialized on late retry")
+        return True
+
+    def _note_backend_error(self, exc: Exception) -> None:
+        """Classify a backend error once (single place for all call sites):
+        client errors and broker-busy 503s are ignored for breaker purposes,
+        endpoint-connection death drops the backend so the next tool call
+        rebuilds it (respawning the broker if it died), everything else counts
+        toward the circuit breaker."""
+        if _is_client_error(exc) or _is_transient_error(exc):
+            return
+        if _is_connection_error(exc):
+            self._backend = None
+        self._record_failure()
 
     def _is_breaker_open(self) -> bool:
         """Return True if the circuit breaker is tripped (too many failures)."""
@@ -310,6 +438,12 @@ class Mem0MemoryProvider(MemoryProvider):
 
     def _format_error(self, prefix: str, exc: Exception) -> str:
         msg = f"{prefix}: {exc}"
+        if _is_transient_error(exc):
+            return (
+                msg + " (mem0 store busy: another Hermes process holds the local "
+                "Qdrant lock; it activates automatically once the lock frees — "
+                "retry shortly)"
+            )
         if self._mode == "oss":
             err_str = str(exc).lower()
             if "connection" in err_str or "refused" in err_str or "timeout" in err_str:
@@ -371,6 +505,18 @@ class Mem0MemoryProvider(MemoryProvider):
             _rr.lower() in ("true", "1", "yes") if isinstance(_rr, str) else bool(_rr)
         )
         self._channel = kwargs.get("platform") or "cli"
+        # On RE-initialization, close the previous backend FIRST. Overwriting it
+        # leaked the old client, and a leaked path-mode Qdrant client keeps its
+        # EXCLUSIVE storage lock for the life of the process — every later init
+        # in this same process then failed with "already accessed by another
+        # instance" (the desktop flapped between success and failure).
+        prev = getattr(self, "_backend", None)
+        if prev is not None:
+            try:
+                prev.close()
+            except Exception:
+                pass
+            self._backend = None
         self._backend = self._create_backend()
         if self._backend and not self._atexit_registered:
             atexit.register(self._shutdown_backend)
@@ -455,7 +601,7 @@ class Mem0MemoryProvider(MemoryProvider):
                     body = "## Mem0 Memory\n" + "\n".join(f"- {l}" for l in lines)
                 self._record_success()
             except Exception as e:
-                self._record_failure()
+                self._note_backend_error(e)
                 logger.debug("Mem0 prefetch failed: %s", e)
             with self._prefetch_lock:
                 if self._prefetch_query == query:
@@ -483,8 +629,21 @@ class Mem0MemoryProvider(MemoryProvider):
         # Slow backend: skip injection; mem0_search tool remains the backstop.
         return ""
 
+    def _sync_max_chars(self) -> int:
+        """Effective per-turn message cap: ``sync_max_chars`` from mem0.json, else the default."""
+        raw = (self._config or {}).get("sync_max_chars", _SYNC_MSG_MAX_CHARS)
+        try:
+            cap = int(raw)
+        except (TypeError, ValueError):
+            return _SYNC_MSG_MAX_CHARS
+        return cap if cap > 0 else _SYNC_MSG_MAX_CHARS
+
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
-        """Send the turn to Mem0 for server-side fact extraction (non-blocking)."""
+        """Send the turn to Mem0 for server-side fact extraction (non-blocking).
+
+        Each message is capped at ``_sync_max_chars()`` first: a small-context
+        embedding backend rejects the whole extraction otherwise (#106235).
+        """
         if self._backend is None or self._is_breaker_open():
             return
 
@@ -497,9 +656,10 @@ class Mem0MemoryProvider(MemoryProvider):
             # Qdrant client out from under us.
             self._sync_in_flight.set()
             try:
+                cap = self._sync_max_chars()
                 messages = [
-                    {"role": "user", "content": user_content},
-                    {"role": "assistant", "content": assistant_content},
+                    {"role": "user", "content": _truncate_for_sync(user_content, cap)},
+                    {"role": "assistant", "content": _truncate_for_sync(assistant_content, cap)},
                 ]
                 backend.add(
                     messages,
@@ -510,7 +670,7 @@ class Mem0MemoryProvider(MemoryProvider):
                 )
                 self._record_success()
             except Exception as e:
-                self._record_failure()
+                self._note_backend_error(e)
                 logger.warning("Mem0 sync failed: %s", e)
             finally:
                 self._sync_in_flight.clear()
@@ -528,7 +688,7 @@ class Mem0MemoryProvider(MemoryProvider):
         return [SEARCH_SCHEMA, ADD_SCHEMA, UPDATE_SCHEMA, DELETE_SCHEMA]
 
     def handle_tool_call(self, tool_name: str, args: dict, **kwargs) -> str:
-        if self._backend is None:
+        if self._backend is None and not self._ensure_backend():
             err = getattr(self, "_init_error", "unknown error")
             hint = ""
             if self._mode == "oss":
@@ -563,8 +723,7 @@ class Mem0MemoryProvider(MemoryProvider):
                           "score": r.get("score", 0)} for r in results]
                 return json.dumps({"results": items, "count": len(items)})
             except Exception as e:
-                if not _is_client_error(e):
-                    self._record_failure()
+                self._note_backend_error(e)
                 return tool_error(self._format_error("Search failed", e))
 
         elif tool_name == "mem0_add":
@@ -585,7 +744,7 @@ class Mem0MemoryProvider(MemoryProvider):
                 msg = "Fact stored." if (self._mode == "oss" or self._host) else "Fact queued for storage."
                 return json.dumps({"result": msg, "event_id": event_id})
             except Exception as e:
-                self._record_failure()
+                self._note_backend_error(e)
                 return tool_error(self._format_error("Failed to store", e))
 
         elif tool_name == "mem0_update":
@@ -602,7 +761,7 @@ class Mem0MemoryProvider(MemoryProvider):
             except Exception as e:
                 if _is_client_error(e):
                     return tool_error(f"Memory not found: {memory_id}")
-                self._record_failure()
+                self._note_backend_error(e)
                 return tool_error(self._format_error("Update failed", e))
 
         elif tool_name == "mem0_delete":
@@ -616,7 +775,7 @@ class Mem0MemoryProvider(MemoryProvider):
             except Exception as e:
                 if _is_client_error(e):
                     return tool_error(f"Memory not found: {memory_id}")
-                self._record_failure()
+                self._note_backend_error(e)
                 return tool_error(self._format_error("Delete failed", e))
 
         return tool_error(f"Unknown tool: {tool_name}")
